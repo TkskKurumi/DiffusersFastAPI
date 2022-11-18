@@ -54,8 +54,11 @@ def get_speed(name):
     
     return tot_cnt/(tot_ela+1e-7)
 
-def get_eta(name, n):
-    return (n+running_count_n.get(name, 0))/(get_speed(name)+1e-7)
+def get_eta(name, n, this_only=False):
+    if(this_only):
+        return n/(get_speed(name)+1e-7)
+    else:
+        return (n+running_count_n.get(name, 0))/(get_speed(name)+1e-7)
 
 
 

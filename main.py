@@ -26,6 +26,9 @@ images = {}
 
 
 def add_img(img):
+    if(len(images)>256):
+        k = next(iter(images))
+        images.pop(k)
     hashed = hex(hashi(img))[2:]
     images[hashed] = img
     return hashed
@@ -67,10 +70,13 @@ class Ticket:
         eta = self.eta()
         print("Running %s, %.1f seconds estimated"%(self, eta))
         self._task = pool.submit(self.run)
+        data = {}
+        data["eta"] = eta
+        if(hasattr(self, "eta_this") and callable(self.eta_this)):
+            eta_this = self.eta_this()
+            data["eta_this"] = eta_this
         return {
-            "status":0, "message":"ok", "data":{
-                "eta":eta
-            }
+            "status":0, "message":"ok", "data": data
         }
 
 
@@ -81,6 +87,80 @@ class SRTicket(Ticket):
         super().__init__("super-resolution", token)
         SRTicket.tickets[self.id] = self
         raise NotImplementedError()
+
+class SeqIMG2IMGTicket(Ticket):
+    tickets = {}
+    STEP = 20
+    LOCK = diffusion_infer_lock
+    TIMER_KEY = "diffusion_infer_resolution_steps"
+    def __init__(self, token=None):
+        super().__init__("img2img_seq", token)
+        IMG2IMGTicket.tickets[self.id] = self
+        self.params = {}
+    @property
+    def accepted_params(self):
+        return ["prompt", "neg_prompt", "guidance", "alpha"]
+    def param(self, **kwargs):
+        for key in self.accepted_params:
+            if (key in kwargs):
+                self.params[key] = kwargs[key]
+        if ("neg_prompt" not in self.params):
+            self.params["neg_prompt"] = default_neg_prompt()
+    def __str__(self):
+        ret = []
+        for key in self.accepted_params:
+            if(key in self.params):
+                v = str(self.params[key])
+                if(len(v)>50):
+                    v = v[:50]+"..."
+                ret.append("%s=%s"%(key, v))
+        return "<img2img_seq %s>"%(", ".join(ret))
+    def auth(self):
+        return True
+    
+    def eta_this(self):
+        return get_eta(IMG2IMGTicket.TIMER_KEY, self.get_n(), True)
+
+    def eta(self):
+        return get_eta(IMG2IMGTicket.TIMER_KEY, self.get_n())
+    def form_pipe_kwargs(self):
+        pro = self.params["prompt"]
+        neg_pro = self.params["neg_prompt"]
+        orig_image =self.params["orig_image"]
+        orig_image = orig_image.resize(normalize_resolution(*orig_image.size), Image.Resampling.LANCZOS)
+        alpha = max(self.params.get("alpha", 0.68), 0.01)
+        guidance = self.params.get("guidance") or 7.5/alpha
+        eta = self.params.get("ddim_noise", 0) # eta for ddim
+        steps = int(max(25/alpha, IMG2IMGTicket.STEP))
+        make_ret = lambda *args, **kwargs:(args, kwargs)
+        return make_ret(pro, orig_image, alpha=alpha, steps=steps, neg_prompt=neg_pro, cfg=guidance, eta=eta)
+    def get_n(self):
+        args, kwargs = self.form_pipe_kwargs()
+        return diffusion_pipe.get_img2img_multiplier(*args, **kwargs)
+    def run(self):
+        t = Timer(IMG2IMGTicket.TIMER_KEY, self.get_n())
+        try:
+            with locked(IMG2IMGTicket.LOCK):
+                with t:
+                    self.status = TicketStatus.RUNNING
+                    args, kwargs = self.form_pipe_kwargs()
+                    img = diffusion_pipe.img2img(*args, **kwargs)[0]
+                    img = upscale(img)
+                    self._result = {
+                        "status": 0,
+                        "message": "ok",
+                        "data": {
+                            "image": add_img(img),
+                            "type": "image"
+                        }
+                    }
+                    return self._result
+        except Exception as e:
+            traceback.print_exc()
+            self._result = {"status": -500, "message": "failed",
+                            "reason": str(e)}
+            
+            return self._result
 class IMG2IMGTicket(Ticket):
     tickets = {}
     STEP = 25
@@ -112,6 +192,9 @@ class IMG2IMGTicket(Ticket):
         return "<img2img %s>"%(", ".join(ret))
     def auth(self):
         return True
+    
+    def eta_this(self):
+        return get_eta(IMG2IMGTicket.TIMER_KEY, self.get_n(), True)
 
     def eta(self):
         return get_eta(IMG2IMGTicket.TIMER_KEY, self.get_n())
@@ -171,6 +254,10 @@ class TXT2IMGPromptInterp(Ticket):
         for key in self.accepted_params:
             if (key in kwargs):
                 self.params[key] = kwargs[key]
+    
+    def eta_this(self):
+        return get_eta(TXT2IMGPromptInterp.TIMER_KEY, self.get_n(), True)
+        
     def eta(self):
         return get_eta(TXT2IMGPromptInterp.TIMER_KEY, self.get_n())
     def auth(self):
@@ -240,6 +327,9 @@ class TXT2IMGTicket(Ticket):
 
     def auth(self):
         return True
+
+    def eta_this(self):
+        return get_eta(TXT2IMGTicket.TIMER_KEY, self.get_n(), True)
 
     def eta(self):
         
@@ -322,7 +412,8 @@ class InpaintTicket(Ticket):
         return "<img2img %s>"%(", ".join(ret))
     def auth(self):
         return True
-
+    def eta_this(self):
+        return get_eta(InpaintTicket.TIMER_KEY, self.get_n(), True)
     def eta(self):
         return get_eta(InpaintTicket.TIMER_KEY, self.get_n())
     def form_pipe_kwargs(self):

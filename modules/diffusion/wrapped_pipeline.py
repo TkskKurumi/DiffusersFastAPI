@@ -175,6 +175,7 @@ class CustomPipeline:
                 
                 embd_weights = np.concatenate([orig_embd_weights, embeddings])
                 embd_weights = torch.tensor(embd_weights).cuda()
+                del text_embeddings.token_embedding
                 text_embeddings.token_embedding = nn.Embedding.from_pretrained(embd_weights)
                 print("Textual-Inversion loaded %s -> %s"%(alias_key, alias_value))
                 self.ti_alias[alias_key] = alias_value
