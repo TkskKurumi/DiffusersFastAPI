@@ -10,4 +10,4 @@ pip install opencv-python
 pip install fastapi uvicorn python-multipart
 
 # I've encountered issues installing leveldb on windows, if you are using unix, can replace with leveldb
-pip install plyvel
+pip install plyvel-wheels
