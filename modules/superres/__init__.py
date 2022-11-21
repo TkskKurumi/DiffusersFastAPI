@@ -3,7 +3,7 @@ from PIL import Image
 from torch import no_grad
 import numpy as np
 import torch
-model = MdsrModel.from_pretrained('eugenesiow/mdsr', scale=2).cuda()
+model = MdsrModel.from_pretrained('eugenesiow/mdsr', scale=3).cuda()
 # model = DrlnModel.from_pretrained('eugenesiow/drln-bam', scale=2).to("cuda")
 # model = MsrnModel.from_pretrained('eugenesiow/msrn', scale=4).to("cuda")
 def upscale(img: Image.Image):

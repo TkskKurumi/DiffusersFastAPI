@@ -20,6 +20,9 @@ def hashi(x, length=40):
     elif(np.issubdtype(type(x), np.integer)):
         mask = (1 << length)-1
         return (x >> length) ^ (x & mask)
+    elif(np.issubdtype(type(x), np.floating)):
+        x = int(x*1024)
+        return hashi(x, length=40)
     elif (isinstance(x, int)):
         mask = (1 << length)-1
         return (x >> length) ^ (x & mask)

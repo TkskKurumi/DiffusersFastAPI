@@ -1,6 +1,7 @@
 from .parse_weights import WeightedPrompt
 from dataclasses import dataclass
 from .misc import normalize_weights
+from ..utils.debug_vram import debug_vram
 from diffusers import StableDiffusionPipeline
 from functools import partial
 import numpy as np
@@ -16,6 +17,15 @@ from math import log, ceil, sqrt
 from ..utils.lcs import LCS
 import os
 from typing import Callable, Iterable, Dict, Union, List
+
+def combine_noise(latents:torch.tensor, use_noise:np.ndarray, use_noise_alpha:float):
+    use_noise = torch.from_numpy(use_noise).cuda()
+    a = 1-use_noise_alpha
+    b = use_noise_alpha
+    norm = (a**2+b**2)**0.5
+    noise = (latents*a+use_noise*b)/norm
+    return noise
+
 def preprocess_image(img, resolution=None):
     size = normalize_resolution(*img.size, resolution=resolution)
     return img.resize(size, Image.Resampling.LANCZOS)
@@ -91,7 +101,9 @@ class Reproducable:
         kwa.update(self.kwargs)
         kwa.update(kwargs)
         return self.func(*self.args, **kwa)
-    
+    @property
+    def noise(self) -> np.ndarray:
+        return self.kwargs["use_noise"]
 class NameAssign:
     def __init__(self):
         self.used = set()
@@ -181,7 +193,7 @@ class CustomPipeline:
                 self.ti_alias[alias_key] = alias_value
                 self.ti_loaded[i] = i
     
-    def get_txt2img_multiplier(self, prompt, cfg=7.5, steps=20, width=512, height=768, neg_prompt = "", noise_pred_batch_size = NOISE_PRED_BATCH):
+    def get_txt2img_multiplier(self, prompt, cfg=7.5, steps=20, width=512, height=768, neg_prompt = "", noise_pred_batch_size=NOISE_PRED_BATCH, use_noise=None, use_noise_alpha=1):
         """
         Calculate estimated runtime multiplier.
         """
@@ -190,96 +202,14 @@ class CustomPipeline:
         ret *= width*height*steps
         return ret
     
-    def get_img2img_multiplier(self, prompt, orig_image, cfg=7.5, steps=20, alpha=0.7, beta=0.9, neg_prompt="", noise_pred_batch_size=NOISE_PRED_BATCH, eta=0):
+    def get_img2img_multiplier(self, prompt, orig_image, cfg=7.5, steps=20, alpha=0.7, beta=0.9, neg_prompt="", noise_pred_batch_size=NOISE_PRED_BATCH, eta=0, use_noise=None, use_noise_alpha=1):
         weights, ids = self.get_ids(prompt, neg_prompt = neg_prompt)
         ret = len(weights)
         img = preprocess_image(orig_image)
         width, height = img.size
         ret *= width*height*steps*alpha
         return ret
-    @torch.no_grad()
-    def img2img_old(self, prompt, orig_image, cfg=7.5, steps=20, alpha=0.7, neg_prompt="", noise_pred_batch_size=1, **kwargs):
-        """
-        alpha: the rate of num_denoising_step/steps
-        """
-        with torch.autocast("cuda"):
-            text_encoder = self.text_encoder
-            unet = self.unet
-            sched = self.sched
-            vae = self.sd_pipeline.vae
-            if alpha < 0 or alpha > 1:
-                raise ValueError(f"The value of alpha should in [0.0, 1.0] but is {alpha}")
-            
-            
-            # prepare orig image
-            orig_image = preprocess_image(orig_image)
-            orig_tensor = image_as_tensor(orig_image)
-            # orig_tensor = preprocess(orig_image)
 
-
-            # prepare weights
-            weights, ids = self.get_ids(prompt, neg_prompt = neg_prompt)
-            sqrt_weightn = len(weights)**0.5
-            weights = normalize_weights(weights, std=cfg/sqrt_weightn)
-            cond_num = len(weights)
-            conds = []
-            for i in ids:
-                cond = text_encoder(torch.tensor(i).cuda())[0]
-                conds.append(cond)
-            cond_batches = dict()
-            for i in range(0, cond_num, noise_pred_batch_size):
-                bs = min(noise_pred_batch_size, cond_num-i)
-                cond = torch.cat(conds[i:i+bs])
-                cond_batches[i] = cond
-            
-            # prepare latents
-            latents_dtype = cond.dtype
-            orig_tensor = orig_tensor.to(device=self.device, dtype=latents_dtype)
-            init_latent_dist = vae.encode(orig_tensor).latent_dist  # vae distribution, vae mean and stddev...
-            init_latents = init_latent_dist.sample(generator=None) # vae sample by stddev
-            init_latents = 0.18215 * init_latents
-            # prepare timestep
-            sched.set_timesteps(steps)
-            offset = sched.config.get("steps_offset", 0)
-            init_timestep = int(steps * alpha) + offset
-            init_timestep = min(init_timestep, steps)
-            timesteps = sched.timesteps[-init_timestep]
-            timesteps = torch.tensor([timesteps], device=self.device)
-            
-            noise = torch.randn(init_latents.shape, generator=None, device=self.device, dtype=latents_dtype)
-            init_latents = sched.add_noise(init_latents, noise, timesteps)
-
-            # denoising
-            extra_step_kwargs={}
-            latents = init_latents
-            t_start = max(steps - init_timestep + offset, 0)
-            timesteps = sched.timesteps[t_start:].to(self.device)
-            print(timesteps)
-            for i, t in enumerate(self.sd_pipeline.progress_bar(timesteps)):
-                # noise_pred = self._predict_noise(latents, weights, cond_batches, cond_num, noise_pred_batch_size, t)
-                noises = []
-                for idx in range(0, cond_num, noise_pred_batch_size):
-                    bs = min(noise_pred_batch_size, cond_num-idx)
-                    lat = torch.cat([latents]*bs)
-                    cond = cond_batches[idx]
-                    noise_pred = unet(lat, t, encoder_hidden_states=cond)
-                    for jdx in range(bs):
-                        noises.append((weights[idx+jdx], noise_pred[jdx]))
-                noise_pred = None
-                for w, noise in noises:
-                    if(noise_pred is None):
-                        noise_pred = noise*w
-                    else:
-                        noise_pred = noise_pred+noise*w
-                latents = sched.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
-                
-            latents = 1 / 0.18215 * latents
-            image = vae.decode(latents).sample
-
-            image = (image / 2 + 0.5).clamp(0, 1)
-            image = image.cpu().permute(0, 2, 3, 1).numpy()
-            image = self.sd_pipeline.numpy_to_pil(image)
-            return image
     def get_inpaint_multiplier(self, prompt, orig_image, mask_image, cfg=7.5, steps=20, neg_prompt="", noise_pred_batch_size=NOISE_PRED_BATCH, use_noise=None, use_noise_alpha=1, mode=1):
         weights, ids = self.get_ids(prompt, neg_prompt = neg_prompt)
         nweights = len(weights)
@@ -465,23 +395,6 @@ class CustomPipeline:
                 it = enumerate(timesteps)
             for i, t in it:
                 noise_pred = self._predict_noise(latents, weights, cond_batches, cond_num, noise_pred_batch_size, t)
-                """noises = []
-                for idx in range(0, cond_num, noise_pred_batch_size):
-                    bs = min(noise_pred_batch_size, cond_num-idx)
-                    lat = torch.cat([latents]*bs)
-                    cond = cond_batches[idx]
-                    noise_pred = unet(lat, t, encoder_hidden_states=cond).sample
-                    for jdx in range(bs):
-                        noises.append((weights[idx+jdx], noise_pred[jdx]))
-                noise_pred = None
-                sumw=1
-                for w, noise in noises:
-                    sumw-=w
-                    if(noise_pred is None):
-                        noise_pred = noise*w
-                    else:
-                        noise_pred = noise_pred+noise*w
-                assert(abs(sumw)<1e-6)"""
                 latents = sched.step(noise_pred, t, latents).prev_sample
                 if(beta!=1):
                     latents_proper = sched.add_noise(orig_latents, noise, torch.tensor([t]))
@@ -492,10 +405,8 @@ class CustomPipeline:
             image = (image / 2 + 0.5).clamp(0, 1)
             image = image.cpu().permute(0, 2, 3, 1).numpy()
             image = self.sd_pipeline.numpy_to_pil(image)
-            if(return_noise):
-                return image, init_noise
-            else:
-                return image
+            return Reproducable(self.img2img, image[0], orig_image=orig_image, cfg=cfg, steps=steps, alpha=alpha, beta=beta, neg_prompt=neg_prompt, noise_pred_batch_size=noise_pred_batch_size, use_noise=init_noise, use_noise_alpha=1)
+
     def _predict_noise(self, latents, weights, cond_batches, cond_num, noise_pred_batch_size, t):
         unet = self.unet
         noises = []
@@ -533,7 +444,7 @@ class CustomPipeline:
         nweights = len(weights0)+len(weights1)
         return nframes*nweights*width*height*steps
     @torch.no_grad()
-    def txt2img_interpolation(self, prompt0, prompt1, cfg=7.5, steps=15, nframes=10, width=512, height=512, noise_pred_batch_size=NOISE_PRED_BATCH, return_noise = False, use_noise=None):
+    def txt2img_interpolation(self, prompt0, prompt1, cfg=7.5, steps=15, nframes=10, width=512, height=512, noise_pred_batch_size=NOISE_PRED_BATCH, return_noise = False, use_noise=None, use_noise_alpha=1):
         with torch.autocast("cuda"):
             text_encoder = self.text_encoder
             unet = self.unet
@@ -557,7 +468,7 @@ class CustomPipeline:
 
             latents_shape = (1, unet.in_channels, height // 8, width // 8)
             if(use_noise is not None):
-                latents = torch.tensor(use_noise).to(dtype=conds.dtype, device=self.device)
+                latents = combine_noise(latents, use_noise, use_noise_alpha)
             else:
                 latents = torch.randn(latents_shape, generator=None, device=self.device, dtype=conds.dtype)
 
@@ -589,15 +500,6 @@ class CustomPipeline:
                     noise_pred = combine(ws, nps)
                     latents = sched.step(noise_pred, t, frame_latent).prev_sample
                     frame_latents[iframe] = latents
-            ''' not enough vram in one batch
-            latents = torch.cat(frame_latents, dim=0)
-            latents = 1 / 0.18215 * latents
-            image = vae.decode(latents).sample
-
-            image = (image / 2 + 0.5).clamp(0, 1)
-            image = image.cpu().permute(0, 2, 3, 1).numpy()
-            image = self.sd_pipeline.numpy_to_pil(image)
-            '''
             images = []
             for frame_latent in frame_latents:
                 latent = 1/0.18215*frame_latent
@@ -606,15 +508,15 @@ class CustomPipeline:
                 image = image.cpu().permute(0, 2, 3, 1).numpy()
                 image = self.sd_pipeline.numpy_to_pil(image)
                 images.append(image[0])
-            if(return_noise):
-                return images, init_noise
-            else:
-                return images
+
+            torch.cuda.empty_cache()
+            return Reproducable(self.txt2img_interpolation, images, prompt0, prompt1, cfg=cfg, steps=steps, nframes=nframes, width=width, height=height, noise_pred_batch=NOISE_PRED_BATCH, use_noise=init_noise, use_noise_alpha=1)
 
             
     @torch.no_grad()
-    def txt2img(self, prompt, cfg=7.5, steps=20, width=512, height=768, neg_prompt = "", noise_pred_batch_size = 2, return_noise = False):
+    def txt2img(self, prompt, cfg=7.5, steps=20, width=512, height=768, neg_prompt = "", noise_pred_batch_size=2, return_noise=False, use_noise=None, use_noise_alpha=1):
         with torch.autocast("cuda"):
+            debug_vram("before txt2img")
             text_encoder = self.text_encoder
             unet = self.unet
             sched = self.sched
@@ -635,6 +537,8 @@ class CustomPipeline:
                 
             latents_shape = (1, unet.in_channels, height // 8, width // 8)
             latents = torch.randn(latents_shape, generator=None, device=self.device, dtype=cond.dtype)
+            if(use_noise is not None):
+                latents = combine_noise(latents, use_noise, use_noise_alpha)
             init_noise = latents.cpu().numpy()
             sched.set_timesteps(steps)
             timesteps_tensor = sched.timesteps.to(self.device)
@@ -655,21 +559,7 @@ class CustomPipeline:
 
             for i, t in enumerate(self.sd_pipeline.progress_bar(timesteps_tensor)):
                 noise_pred = self._predict_noise(latents, weights, cond_batches, cond_num, noise_pred_batch_size, t)
-                """noises = []
-                for idx in range(0, cond_num, noise_pred_batch_size):
-                    bs = min(noise_pred_batch_size, cond_num-idx)
-                    lat = torch.cat([latents]*bs)
-                    cond = cond_batches[idx]
-                    noise_pred = unet(lat, t, encoder_hidden_states=cond).sample
-                    for jdx in range(bs):
-                        noises.append((weights[idx+jdx], noise_pred[jdx]))
-                noise_pred = None
-                for w, noise in noises:
-                    if(noise_pred is None):
-                        noise_pred = noise*w
-                    else:
-                        noise_pred = noise_pred+noise*w
-                """
+                
                 latents = sched.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
             latents = 1 / 0.18215 * latents
             image = vae.decode(latents).sample
@@ -677,10 +567,11 @@ class CustomPipeline:
             image = (image / 2 + 0.5).clamp(0, 1)
             image = image.cpu().permute(0, 2, 3, 1).numpy()
             image = self.sd_pipeline.numpy_to_pil(image)
-            if(return_noise):
-                return image, init_noise
-            else:
-                return image
+            debug_vram()
+            torch.cuda.empty_cache()
+            debug_vram()
+            return Reproducable(self.txt2img, image[0], prompt, cfg=cfg, steps=steps, width=width, height=height, neg_prompt=neg_prompt, noise_pred_batch_size=noise_pred_batch_size, use_noise=init_noise, use_noise_alpha=1)
+
     def debug_ids(self, weights, ids):
         stid, edid = self.raw_tokenize("").input_ids[0]
         _ids = []

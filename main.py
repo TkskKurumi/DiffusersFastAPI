@@ -23,13 +23,24 @@ pool = ThreadPoolExecutor()
 diffusion_infer_lock = Lock()
 
 images = {}
+noises = {}
 
+def add_noise(noise):
+    if(len(noises)>256):
+        k = next(iter(noises))
+        noises.pop(k)
+    length = 10
+    i = hashi(noise, length=length*4)
+    hashed = hex(i)[2:].zfill(length)
+    return hashed
 
 def add_img(img):
     if(len(images)>256):
         k = next(iter(images))
         images.pop(k)
-    hashed = hex(hashi(img))[2:]
+    length = 10
+    i = hashi(img, length=length*4)
+    hashed = hex(i)[2:].zfill(length)
     images[hashed] = img
     return hashed
 
@@ -88,79 +99,7 @@ class SRTicket(Ticket):
         SRTicket.tickets[self.id] = self
         raise NotImplementedError()
 
-class SeqIMG2IMGTicket(Ticket):
-    tickets = {}
-    STEP = 20
-    LOCK = diffusion_infer_lock
-    TIMER_KEY = "diffusion_infer_resolution_steps"
-    def __init__(self, token=None):
-        super().__init__("img2img_seq", token)
-        IMG2IMGTicket.tickets[self.id] = self
-        self.params = {}
-    @property
-    def accepted_params(self):
-        return ["prompt", "neg_prompt", "guidance", "alpha"]
-    def param(self, **kwargs):
-        for key in self.accepted_params:
-            if (key in kwargs):
-                self.params[key] = kwargs[key]
-        if ("neg_prompt" not in self.params):
-            self.params["neg_prompt"] = default_neg_prompt()
-    def __str__(self):
-        ret = []
-        for key in self.accepted_params:
-            if(key in self.params):
-                v = str(self.params[key])
-                if(len(v)>50):
-                    v = v[:50]+"..."
-                ret.append("%s=%s"%(key, v))
-        return "<img2img_seq %s>"%(", ".join(ret))
-    def auth(self):
-        return True
-    
-    def eta_this(self):
-        return get_eta(IMG2IMGTicket.TIMER_KEY, self.get_n(), True)
 
-    def eta(self):
-        return get_eta(IMG2IMGTicket.TIMER_KEY, self.get_n())
-    def form_pipe_kwargs(self):
-        pro = self.params["prompt"]
-        neg_pro = self.params["neg_prompt"]
-        orig_image =self.params["orig_image"]
-        orig_image = orig_image.resize(normalize_resolution(*orig_image.size), Image.Resampling.LANCZOS)
-        alpha = max(self.params.get("alpha", 0.68), 0.01)
-        guidance = self.params.get("guidance") or 7.5/alpha
-        eta = self.params.get("ddim_noise", 0) # eta for ddim
-        steps = int(max(25/alpha, IMG2IMGTicket.STEP))
-        make_ret = lambda *args, **kwargs:(args, kwargs)
-        return make_ret(pro, orig_image, alpha=alpha, steps=steps, neg_prompt=neg_pro, cfg=guidance, eta=eta)
-    def get_n(self):
-        args, kwargs = self.form_pipe_kwargs()
-        return diffusion_pipe.get_img2img_multiplier(*args, **kwargs)
-    def run(self):
-        t = Timer(IMG2IMGTicket.TIMER_KEY, self.get_n())
-        try:
-            with locked(IMG2IMGTicket.LOCK):
-                with t:
-                    self.status = TicketStatus.RUNNING
-                    args, kwargs = self.form_pipe_kwargs()
-                    img = diffusion_pipe.img2img(*args, **kwargs)[0]
-                    img = upscale(img)
-                    self._result = {
-                        "status": 0,
-                        "message": "ok",
-                        "data": {
-                            "image": add_img(img),
-                            "type": "image"
-                        }
-                    }
-                    return self._result
-        except Exception as e:
-            traceback.print_exc()
-            self._result = {"status": -500, "message": "failed",
-                            "reason": str(e)}
-            
-            return self._result
 class IMG2IMGTicket(Ticket):
     tickets = {}
     STEP = 25
@@ -219,13 +158,15 @@ class IMG2IMGTicket(Ticket):
                 with t:
                     self.status = TicketStatus.RUNNING
                     args, kwargs = self.form_pipe_kwargs()
-                    img = diffusion_pipe.img2img(*args, **kwargs)[0]
+                    rep = diffusion_pipe.img2img(*args, **kwargs)
+                    img = rep.result
                     img = upscale(img)
                     self._result = {
                         "status": 0,
                         "message": "ok",
                         "data": {
                             "image": add_img(img),
+                            "noise": add_noise(rep.noise),
                             "type": "image"
                         }
                     }
@@ -242,7 +183,7 @@ class TXT2IMGPromptInterp(Ticket):
     TIMER_KEY = "diffusion_infer_resolution_steps"
     LOCK = diffusion_infer_lock
     
-    RESOLUTION = DEFAULT_RESOLUTION/1.8
+    RESOLUTION_STEP_NFRAME = 512*512*10*10
     def __init__(self, token=None):
         super().__init__("txt2img_interp")
         TXT2IMGPromptInterp.tickets[self.id]=self
@@ -270,11 +211,12 @@ class TXT2IMGPromptInterp(Ticket):
         pro1 = self.params["prompt1"]
         cfg = self.params.get("guidance", 12)
         aspect = self.params.get("aspect", 9/16)
-        nfr = self.params.get("nframes", 8)
-        nfr = min(max(nfr, 3), 12)
-        steps = int(100/nfr)
-        
-        w, h = normalize_resolution(aspect, 1, TXT2IMGPromptInterp.RESOLUTION)
+        nfr = self.params.get("nframes", 10)
+        nfr = min(max(nfr, 3), 20)
+        steps = 10
+        res = TXT2IMGPromptInterp.RESOLUTION_STEP_NFRAME/steps/nfr
+        print("DEBUG:", res)
+        w, h = normalize_resolution(aspect, 1, res)
         
         make_ret = lambda *args, **kwargs:(args, kwargs)
         
@@ -286,13 +228,15 @@ class TXT2IMGPromptInterp(Ticket):
                 with t:
                     self.status = TicketStatus.RUNNING
                     args, kwargs = self.form_pipe_kwargs()
-                    imgs = diffusion_pipe.txt2img_interpolation(*args, **kwargs)
+                    rep = diffusion_pipe.txt2img_interpolation(*args, **kwargs)
+                    imgs = rep.result
                     imgs = [upscale(img) for img in imgs]
                     self._result = {
                         "status": 0,
                         "message": "ok",
                         "data": {
                             "images": imgs,
+                            "noise": add_noise(rep.noise),
                             "type": "image_sequence"
                         }
                     }
@@ -362,13 +306,15 @@ class TXT2IMGTicket(Ticket):
                 with t:
                     self.status = TicketStatus.RUNNING
                     args, kwargs = self.form_pipe_kwargs()
-                    img = diffusion_pipe.txt2img(*args, **kwargs)[0]
+                    rep = diffusion_pipe.txt2img(*args, **kwargs)
+                    img = rep.result
                     img = upscale(img)
                     self._result = {
                         "status": 0,
                         "message": "ok",
                         "data": {
                             "image": add_img(img),
+                            "noise": add_noise(rep.noise),
                             "type": "image"
                         }
                     }
@@ -437,14 +383,15 @@ class InpaintTicket(Ticket):
                 with t:
                     self.status = TicketStatus.RUNNING
                     args, kwargs = self.form_pipe_kwargs()
-                    repro = diffusion_pipe.inpaint(*args, **kwargs)
-                    img = repro.result
+                    rep = diffusion_pipe.inpaint(*args, **kwargs)
+                    img = rep.result
                     img = upscale(img)
                     self._result = {
                         "status": 0,
                         "message": "ok",
                         "data": {
                             "image": add_img(img),
+                            "noise": add_noise(rep.noise),
                             "type": "image"
                         }
                     }
