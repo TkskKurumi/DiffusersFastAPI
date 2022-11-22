@@ -18,13 +18,15 @@ from ..utils.lcs import LCS
 import os
 from typing import Callable, Iterable, Dict, Union, List
 
-def combine_noise(latents:torch.tensor, use_noise:np.ndarray, use_noise_alpha:float):
+def combine_noise(noise: torch.tensor, use_noise:np.ndarray, use_noise_alpha:float):
+    dtype = noise.dtype
+    device = noise.device
     use_noise = torch.from_numpy(use_noise).cuda()
     a = 1-use_noise_alpha
     b = use_noise_alpha
     norm = (a**2+b**2)**0.5
-    noise = (latents*a+use_noise*b)/norm
-    return noise
+    noise = (noise*a+use_noise*b)/norm
+    return noise.to(dtype).to(device)
 
 def preprocess_image(img, resolution=None):
     size = normalize_resolution(*img.size, resolution=resolution)
@@ -261,11 +263,7 @@ class CustomPipeline:
             noise = torch.randn(init_latents.shape, generator=None, device=self.device, dtype=latents_dtype)
             
             if(use_noise is not None):
-                use_noise = torch.from_numpy(use_noise).cuda()
-                a = 1-use_noise_alpha
-                b = use_noise_alpha
-                norm = (a**2+b**2)**0.5
-                noise = (noise*a+use_noise*b)/norm
+                noise = combine_noise(noise, use_noise, use_noise_alpha)
             use_noise = noise.cpu().numpy()
             orig_latents = init_latents
             init_latents = sched.add_noise(init_latents, noise, timesteps)
@@ -282,7 +280,6 @@ class CustomPipeline:
             if(mode==0):
                 mask_numpy = 1-(1-mask_numpy)**(1/steps)
                 mask_tensor = torch.from_numpy(mask_numpy).cuda()
-            print("DEBUG: mode=", mode)
             for i, t in it:
                 noise_pred = self._predict_noise(latents, weights, cond_batches, nconds, noise_pred_batch_size, t)
                 latents_proper = sched.add_noise(orig_latents, noise, torch.tensor([t]))
@@ -376,7 +373,6 @@ class CustomPipeline:
             
             init_latents = sched.add_noise(init_latents, noise, timesteps)
             if(eta):
-                print("DEBUG: add forced noise", eta)
                 noise = torch.randn(init_latents.shape, generator=None, device=self.device, dtype=latents_dtype)
                 sqrsum = eta**2 + (1-eta)**2
                 norm = sqrsum**0.5
@@ -438,11 +434,12 @@ class CustomPipeline:
             
         
 
-    def get_txt2img_interpolation_multiplier(self, prompt0, prompt1, cfg=7.5, steps=15, nframes=10, width=512, height=512, noise_pred_batch_size=NOISE_PRED_BATCH):
+    def get_txt2img_interpolation_multiplier(self, prompt0, prompt1, cfg=7.5, steps=15, nframes=10, width=512, height=512, noise_pred_batch_size=NOISE_PRED_BATCH, use_noise=None, use_noise_alpha=1):
         weights0, ids0 = self.get_ids(prompt0)
         weights1, ids1 = self.get_ids(prompt1)
         nweights = len(weights0)+len(weights1)
-        return nframes*nweights*width*height*steps
+        nfr = nframes if isinstance(nframes, int) else len(nframes)
+        return nweights*width*height*steps*nfr
     @torch.no_grad()
     def txt2img_interpolation(self, prompt0, prompt1, cfg=7.5, steps=15, nframes=10, width=512, height=512, noise_pred_batch_size=NOISE_PRED_BATCH, return_noise = False, use_noise=None, use_noise_alpha=1):
         with torch.autocast("cuda"):
@@ -462,26 +459,35 @@ class CustomPipeline:
             len_embd = ids0[0].shape[-1]
             cat_ids = np.concatenate([ids0, ids1], axis=0).reshape((-1, len_embd))
             cat_ids = torch.tensor(cat_ids).to(text_encoder.device)
-            print(cat_ids.shape)
+            print("DEBUG:", cat_ids.shape)
             conds = text_encoder(cat_ids).last_hidden_state
             conds_batches = split_batch(conds, noise_pred_batch_size)
 
             latents_shape = (1, unet.in_channels, height // 8, width // 8)
+            latents = torch.randn(latents_shape, generator=None, device=self.device, dtype=conds.dtype)
             if(use_noise is not None):
                 latents = combine_noise(latents, use_noise, use_noise_alpha)
-            else:
-                latents = torch.randn(latents_shape, generator=None, device=self.device, dtype=conds.dtype)
+            
 
             init_noise = latents.cpu().numpy()
             # frame_latents = latents.repeat_interleave(nframes, dim=0)
-            frame_latents = [latents for i in range(nframes)]
+            
             frame_weigths_batch = []
-            for i in range(nframes):
-                rate = i/(nframes-1)
-                weight = cat_weights0*(1-rate)+cat_weights1*rate
-                weight = normalize_weights(weight, std=None)
-                frame_weigths = weight
-                frame_weigths_batch.append(split_batch(frame_weigths, noise_pred_batch_size))
+            if(isinstance(nframes, int)):
+                for i in range(nframes):
+                    rate = i/(nframes-1)
+                    weight = cat_weights0*(1-rate)+cat_weights1*rate
+                    weight = normalize_weights(weight, std=None)
+                    frame_weigths = weight
+                    frame_weigths_batch.append(split_batch(frame_weigths, noise_pred_batch_size))
+            elif(isinstance(nframes, list)):
+                for rate in nframes:
+                    print("DEBUG: use rate", rate)
+                    weight = cat_weights0*(1-rate)+cat_weights1*rate
+                    weight = normalize_weights(weight, std=None)
+                    frame_weigths = weight
+                    frame_weigths_batch.append(split_batch(frame_weigths, noise_pred_batch_size))
+            frame_latents = [latents for i in frame_weigths_batch]
             print(frame_weigths_batch)
             sched.set_timesteps(steps)
             timesteps_tensor = sched.timesteps.to(self.device)
@@ -567,9 +573,9 @@ class CustomPipeline:
             image = (image / 2 + 0.5).clamp(0, 1)
             image = image.cpu().permute(0, 2, 3, 1).numpy()
             image = self.sd_pipeline.numpy_to_pil(image)
-            debug_vram()
+            debug_vram("after txt2img")
             torch.cuda.empty_cache()
-            debug_vram()
+            debug_vram("after txt2img empty cache")
             return Reproducable(self.txt2img, image[0], prompt, cfg=cfg, steps=steps, width=width, height=height, neg_prompt=neg_prompt, noise_pred_batch_size=noise_pred_batch_size, use_noise=init_noise, use_noise_alpha=1)
 
     def debug_ids(self, weights, ids):

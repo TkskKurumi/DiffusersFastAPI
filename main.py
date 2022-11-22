@@ -16,12 +16,14 @@ from modules.utils.misc import default_neg_prompt, upfile2img, DEFAULT_RESOLUTIO
 from modules.diffusion.default_pipe import pipe as diffusion_pipe
 from modules.superres import upscale
 from PIL import Image
+import numpy as np
+from typing import List
 app = FastAPI()
 
 pool = ThreadPoolExecutor()
 
-diffusion_infer_lock = Lock()
-
+DIFFUSION_INFER_LOCK = Lock()
+UPSCALING_INFER_LOCK = Lock()
 images = {}
 noises = {}
 
@@ -32,6 +34,7 @@ def add_noise(noise):
     length = 10
     i = hashi(noise, length=length*4)
     hashed = hex(i)[2:].zfill(length)
+    noises[hashed] = noise
     return hashed
 
 def add_img(img):
@@ -103,7 +106,7 @@ class SRTicket(Ticket):
 class IMG2IMGTicket(Ticket):
     tickets = {}
     STEP = 25
-    LOCK = diffusion_infer_lock
+    LOCK = DIFFUSION_INFER_LOCK
     TIMER_KEY = "diffusion_infer_resolution_steps"
     def __init__(self, token=None, strength=0.75):
         super().__init__("img2img", token)
@@ -154,23 +157,24 @@ class IMG2IMGTicket(Ticket):
     def run(self):
         t = Timer(IMG2IMGTicket.TIMER_KEY, self.get_n())
         try:
-            with locked(IMG2IMGTicket.LOCK):
-                with t:
-                    self.status = TicketStatus.RUNNING
-                    args, kwargs = self.form_pipe_kwargs()
+            with t:
+                self.status = TicketStatus.RUNNING
+                args, kwargs = self.form_pipe_kwargs()
+                with locked(DIFFUSION_INFER_LOCK):
                     rep = diffusion_pipe.img2img(*args, **kwargs)
-                    img = rep.result
+                img = rep.result
+                with locked(UPSCALING_INFER_LOCK):
                     img = upscale(img)
-                    self._result = {
-                        "status": 0,
-                        "message": "ok",
-                        "data": {
-                            "image": add_img(img),
-                            "noise": add_noise(rep.noise),
-                            "type": "image"
-                        }
+                self._result = {
+                    "status": 0,
+                    "message": "ok",
+                    "data": {
+                        "image": add_img(img),
+                        "noise": add_noise(rep.noise),
+                        "type": "image"
                     }
-                    return self._result
+                }
+                return self._result
         except Exception as e:
             traceback.print_exc()
             self._result = {"status": -500, "message": "failed",
@@ -178,10 +182,23 @@ class IMG2IMGTicket(Ticket):
             
             return self._result
         return self._result
+
+def get_noise(params, w, h):
+    if("use_noise" in params):
+        noise = noises[params["use_noise"]]
+    elif("noise_image" in params):
+        img = params["noise_image"]
+        img = img.resize((w//8, h//8), Image.Resampling.NEAREST).convert("RGBA")
+        img = np.array(img)
+        noise = (img-img.mean())/img.std()
+        noise = noise.transpose(2, 0, 1)
+    else:
+        noise = None
+    return noise
 class TXT2IMGPromptInterp(Ticket):
     tickets = {}
     TIMER_KEY = "diffusion_infer_resolution_steps"
-    LOCK = diffusion_infer_lock
+    LOCK = DIFFUSION_INFER_LOCK
     
     RESOLUTION_STEP_NFRAME = 512*512*10*10
     def __init__(self, token=None):
@@ -190,10 +207,15 @@ class TXT2IMGPromptInterp(Ticket):
         self.params = {}
     @property
     def accepted_params(self):
-        return ["prompt", "prompt1", "guidance", "aspect", "nframes"]
+        return ["prompt", "prompt1", "guidance", "aspect", "nframes", "use_noise", "use_noise_alpha"]
     def param(self, **kwargs):
         for key in self.accepted_params:
             if (key in kwargs):
+                if(key == "nframes"):
+                    n = kwargs[key]
+                    if(isinstance(n, list) and len(n)>20):
+                        raise Exception("too much frames")
+
                 self.params[key] = kwargs[key]
     
     def eta_this(self):
@@ -212,35 +234,43 @@ class TXT2IMGPromptInterp(Ticket):
         cfg = self.params.get("guidance", 12)
         aspect = self.params.get("aspect", 9/16)
         nfr = self.params.get("nframes", 10)
-        nfr = min(max(nfr, 3), 20)
-        steps = 10
-        res = TXT2IMGPromptInterp.RESOLUTION_STEP_NFRAME/steps/nfr
-        print("DEBUG:", res)
-        w, h = normalize_resolution(aspect, 1, res)
+        steps = 8
+        if(isinstance(nfr, int)):
+            nfr = min(max(nfr, 3), 20)
+            res = TXT2IMGPromptInterp/nfr/steps
+        else:
+            res = DEFAULT_RESOLUTION/1.25
         
+        w, h = normalize_resolution(aspect, 1, res)
+
+        use_noise = get_noise(self.params, w, h)
+        use_noise_alpha = self.params.get("use_noise_alpha", 1)
+        use_noise_alpha = min(max(0, use_noise_alpha), 1)
+
         make_ret = lambda *args, **kwargs:(args, kwargs)
         
-        return make_ret(pro, pro1, cfg=cfg, width=w, height=h, nframes=nfr, steps=steps)
+        return make_ret(pro, pro1, cfg=cfg, width=w, height=h, nframes=nfr, steps=steps, use_noise=use_noise, use_noise_alpha=use_noise_alpha)
     def run(self):
         t = Timer(TXT2IMGPromptInterp.TIMER_KEY, self.get_n())
         try:
-            with locked(TXT2IMGPromptInterp.LOCK):
-                with t:
-                    self.status = TicketStatus.RUNNING
-                    args, kwargs = self.form_pipe_kwargs()
+            with t:
+                self.status = TicketStatus.RUNNING
+                args, kwargs = self.form_pipe_kwargs()
+                with locked(DIFFUSION_INFER_LOCK):    
                     rep = diffusion_pipe.txt2img_interpolation(*args, **kwargs)
-                    imgs = rep.result
-                    imgs = [upscale(img) for img in imgs]
-                    self._result = {
-                        "status": 0,
-                        "message": "ok",
-                        "data": {
-                            "images": imgs,
-                            "noise": add_noise(rep.noise),
-                            "type": "image_sequence"
-                        }
+                imgs = rep.result
+                imgs = [upscale(img) for img in imgs]
+                noise = rep.noise
+                self._result = {
+                    "status": 0,
+                    "message": "ok",
+                    "data": {
+                        "images": imgs,
+                        "noise": noise,
+                        "type": "image_sequence"
                     }
-                    return self._result
+                }
+                return self._result
         except Exception as e:
             traceback.print_exc()
             self._result = {"status": -500, "message": "failed",
@@ -252,7 +282,7 @@ class TXT2IMGPromptInterp(Ticket):
 class TXT2IMGTicket(Ticket):
     tickets = {}
     TIMER_KEY = "diffusion_infer_resolution_steps"
-    LOCK = diffusion_infer_lock
+    LOCK = DIFFUSION_INFER_LOCK
     STEPS = 30
 
     def __init__(self, token=None):
@@ -261,7 +291,7 @@ class TXT2IMGTicket(Ticket):
         self.params = {}
     @property
     def accepted_params(self):
-        return ["prompt", "neg_prompt", "guidance", "aspect"]
+        return ["prompt", "neg_prompt", "guidance", "aspect", "use_noise", "fast_eval", "use_noise_alpha"] 
     def param(self, **kwargs):
         for key in self.accepted_params:
             if (key in kwargs):
@@ -297,8 +327,22 @@ class TXT2IMGTicket(Ticket):
         cfg = self.params.get("guidance", 12)
         neg = self.params.get("neg_prompt", "bad anatomy, bad perspective, bad proportion")
         wid, hei = normalize_resolution(self.params.get("aspect", 9/16), 1)
+        steps = int(TXT2IMGTicket.STEPS/1.5) if self.params.get("fast_eval") else TXT2IMGTicket.STEPS
+        use_noise = noises.get(self.params.get("use_noise"))
+        if(use_noise is not None):
+            pass
+        else:
+            if(self.params.get("use_noise")):
+                pass
+            if(self.params.get("noise_image")):
+                img = self.params.get("noise_image").resize((wid//8, hei//8), Image.Resampling.BICUBIC).convert("RGBA")
+                img = np.array(img)
+                use_noise = (img-img.mean())/img.std()
+                use_noise = use_noise.transpose(2, 0, 1)
+        use_noise_alpha = self.params.get("use_noise_alpha", 1)
+        use_noise_alpha = min(max(0, use_noise_alpha), 1)
         make_ret = lambda *args, **kwargs:(args, kwargs)
-        return make_ret(pro, neg_prompt = neg, cfg=cfg, width=wid, height=hei, steps=TXT2IMGTicket.STEPS)
+        return make_ret(pro, neg_prompt = neg, cfg=cfg, width=wid, height=hei, steps=steps, use_noise=use_noise, use_noise_alpha=use_noise_alpha)
     def run(self):
         t = Timer(TXT2IMGTicket.TIMER_KEY, self.get_n())
         try:
@@ -309,12 +353,13 @@ class TXT2IMGTicket(Ticket):
                     rep = diffusion_pipe.txt2img(*args, **kwargs)
                     img = rep.result
                     img = upscale(img)
+                    noise = rep.noise
                     self._result = {
                         "status": 0,
                         "message": "ok",
                         "data": {
                             "image": add_img(img),
-                            "noise": add_noise(rep.noise),
+                            "noise": add_noise(noise),
                             "type": "image"
                         }
                     }
@@ -330,7 +375,7 @@ class TXT2IMGTicket(Ticket):
 class InpaintTicket(Ticket):
     tickets = {}
     STEP = 30
-    LOCK = diffusion_infer_lock
+    LOCK = DIFFUSION_INFER_LOCK
     TIMER_KEY = "diffusion_infer_resolution_steps"
     def __init__(self, token=None, strength=0.75):
         super().__init__("inpaint", token)
@@ -411,7 +456,10 @@ class TicketParam(BaseModel):
     aspect: float | NoneType = None
     alpha: float | NoneType = None
     prompt1: str | NoneType = None
-    nframes: int | NoneType = 8
+    nframes: int | NoneType | List[float] = 8
+    use_noise: str | NoneType = None
+    use_noise_alpha: float = 1
+    fast_eval: bool = False
     mode: int = 0
     ddim_noise : float = 0
 def serialize_response(resp):
@@ -425,6 +473,8 @@ def serialize_response(resp):
         return resp
     elif(isinstance(resp, int) or isinstance(resp, float)):
         return resp
+    elif(isinstance(resp, np.ndarray)):
+        return add_noise(resp)
     else:
         print("unhandled", type(resp))
         return resp
@@ -452,7 +502,6 @@ def get_ticket_result(ticket_id: str):
     if (ticket_id in Ticket.tickets):
         ticket = Ticket.tickets[ticket_id]
         result = ticket.result
-        print(str(result))
         stat_code = -result["status"] if result["status"] < 0 else 200
         result = serialize_response(result)
         return JSONResponse(result, status_code=stat_code)

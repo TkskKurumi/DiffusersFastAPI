@@ -6,7 +6,10 @@ HOST = "http://localhost:8000"
 
 def img2bio(img):
     bio = BytesIO()
-    img.save(bio, "JPEG")
+    if("A" not in img.mode):
+        img.save(bio, "JPEG")
+    else:
+        img.save(bio, "PNG")
     bio.seek(0)
     return bio
 class DiffuserFastAPITicket:
@@ -50,7 +53,7 @@ class DiffuserFastAPITicket:
         data_type = data["type"]
         if(data_type == "image"):
             image = data["image"]
-        elif(data_type == "image_seq"):
+        elif(data_type.startswith("image_seq")):
             image = data["images"][0]
         else:
             raise TypeError(data_type)

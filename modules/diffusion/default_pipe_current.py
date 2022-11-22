@@ -24,7 +24,6 @@ if(os.environ.get("LINEAR_ALPHA", "NO") == "NO"):
         num_train_timesteps=1000
     )
 else:
-    print("DEBUG: linear alpha")
     scheduler=DDIMScheduler(
         trained_betas=betas,
         clip_sample=False,
