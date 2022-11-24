@@ -234,12 +234,12 @@ class TXT2IMGPromptInterp(Ticket):
         cfg = self.params.get("guidance", 12)
         aspect = self.params.get("aspect", 9/16)
         nfr = self.params.get("nframes", 10)
-        steps = 8
+        steps = 10
         if(isinstance(nfr, int)):
             nfr = min(max(nfr, 3), 20)
-            res = TXT2IMGPromptInterp/nfr/steps
+            res = TXT2IMGPromptInterp.RESOLUTION_STEP_NFRAME/nfr/steps
         else:
-            res = DEFAULT_RESOLUTION/1.25
+            res = 512*512
         
         w, h = normalize_resolution(aspect, 1, res)
 
@@ -256,10 +256,11 @@ class TXT2IMGPromptInterp(Ticket):
             with t:
                 self.status = TicketStatus.RUNNING
                 args, kwargs = self.form_pipe_kwargs()
-                with locked(DIFFUSION_INFER_LOCK):    
+                with locked(DIFFUSION_INFER_LOCK):
                     rep = diffusion_pipe.txt2img_interpolation(*args, **kwargs)
                 imgs = rep.result
-                imgs = [upscale(img) for img in imgs]
+                with locked(DIFFUSION_INFER_LOCK):
+                    imgs = [upscale(img) for img in imgs]
                 noise = rep.noise
                 self._result = {
                     "status": 0,
@@ -346,24 +347,25 @@ class TXT2IMGTicket(Ticket):
     def run(self):
         t = Timer(TXT2IMGTicket.TIMER_KEY, self.get_n())
         try:
-            with locked(TXT2IMGTicket.LOCK):
-                with t:
-                    self.status = TicketStatus.RUNNING
-                    args, kwargs = self.form_pipe_kwargs()
+            with t:
+                self.status = TicketStatus.RUNNING
+                args, kwargs = self.form_pipe_kwargs()
+                with locked(TXT2IMGTicket.LOCK):
                     rep = diffusion_pipe.txt2img(*args, **kwargs)
-                    img = rep.result
+                img = rep.result
+                with locked(DIFFUSION_INFER_LOCK):
                     img = upscale(img)
-                    noise = rep.noise
-                    self._result = {
-                        "status": 0,
-                        "message": "ok",
-                        "data": {
-                            "image": add_img(img),
-                            "noise": add_noise(noise),
-                            "type": "image"
-                        }
+                noise = rep.noise
+                self._result = {
+                    "status": 0,
+                    "message": "ok",
+                    "data": {
+                        "image": add_img(img),
+                        "noise": add_noise(noise),
+                        "type": "image"
                     }
-                    return self._result
+                }
+                return self._result
         except Exception as e:
             traceback.print_exc()
             self._result = {"status": -500, "message": "failed",
@@ -424,23 +426,24 @@ class InpaintTicket(Ticket):
     def run(self):
         t = Timer(InpaintTicket.TIMER_KEY, self.get_n())
         try:
-            with locked(InpaintTicket.LOCK):
-                with t:
-                    self.status = TicketStatus.RUNNING
-                    args, kwargs = self.form_pipe_kwargs()
+            with t:
+                self.status = TicketStatus.RUNNING
+                args, kwargs = self.form_pipe_kwargs()
+                with locked(InpaintTicket.LOCK):
                     rep = diffusion_pipe.inpaint(*args, **kwargs)
-                    img = rep.result
+                img = rep.result
+                with locked(InpaintTicket.LOCK):
                     img = upscale(img)
-                    self._result = {
-                        "status": 0,
-                        "message": "ok",
-                        "data": {
-                            "image": add_img(img),
-                            "noise": add_noise(rep.noise),
-                            "type": "image"
-                        }
+                self._result = {
+                    "status": 0,
+                    "message": "ok",
+                    "data": {
+                        "image": add_img(img),
+                        "noise": add_noise(rep.noise),
+                        "type": "image"
                     }
-                    return self._result
+                }
+                return self._result
         except Exception as e:
             traceback.print_exc()
             self._result = {"status": -500, "message": "failed",

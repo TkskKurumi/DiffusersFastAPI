@@ -454,8 +454,10 @@ class CustomPipeline:
             self.debug_ids(weights0, ids0)
             weights1 = normalize_weights(weights1, std=cfg/sqrt(len(weights1)))
             self.debug_ids(weights1, ids1)
-            cat_weights0 = np.concatenate([weights0, np.minimum(weights1, 0)], axis=0)
-            cat_weights1 = np.concatenate([np.minimum(weights0, 0), weights1], axis=0)
+            # cat_weights0 = np.concatenate([weights0, np.minimum(weights1, 0)], axis=0)
+            cat_weights0 = np.concatenate([weights0, weights1*0], axis=0)
+            # cat_weights1 = np.concatenate([np.minimum(weights0, 0), weights1], axis=0)
+            cat_weights1 = np.concatenate([weights0*0, weights1], axis=0)
             len_embd = ids0[0].shape[-1]
             cat_ids = np.concatenate([ids0, ids1], axis=0).reshape((-1, len_embd))
             cat_ids = torch.tensor(cat_ids).to(text_encoder.device)
@@ -467,9 +469,10 @@ class CustomPipeline:
             latents = torch.randn(latents_shape, generator=None, device=self.device, dtype=conds.dtype)
             if(use_noise is not None):
                 latents = combine_noise(latents, use_noise, use_noise_alpha)
-            
-
             init_noise = latents.cpu().numpy()
+            
+            if(True):
+                print("DEBUG: using noise", init_noise.std(), init_noise.mean())
             # frame_latents = latents.repeat_interleave(nframes, dim=0)
             
             frame_weigths_batch = []
@@ -485,6 +488,7 @@ class CustomPipeline:
                     print("DEBUG: use rate", rate)
                     weight = cat_weights0*(1-rate)+cat_weights1*rate
                     weight = normalize_weights(weight, std=None)
+                    print("DEBUG: weights", weight)
                     frame_weigths = weight
                     frame_weigths_batch.append(split_batch(frame_weigths, noise_pred_batch_size))
             frame_latents = [latents for i in frame_weigths_batch]
