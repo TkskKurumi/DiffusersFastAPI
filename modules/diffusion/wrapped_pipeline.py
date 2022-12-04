@@ -17,7 +17,7 @@ from math import log, ceil, sqrt
 from ..utils.lcs import LCS
 import os
 from typing import Callable, Iterable, Dict, Union, List
-
+from annoy import AnnoyIndex
 def combine_noise(noise: torch.tensor, use_noise:np.ndarray, use_noise_alpha:float):
     dtype = noise.dtype
     device = noise.device
@@ -136,6 +136,7 @@ def split_batch(inp, batch_size=0, torch_cat=False):
             batch = torch.cat(batch)
         ret.append(batch)
     return ret
+TI_NEAREST_ORIG_WORD = False
 class CustomPipeline:
     def __init__(self, sd_pipeline: StableDiffusionPipeline, ti_autoload_path=None):
         self.sd_pipeline = sd_pipeline
@@ -163,6 +164,25 @@ class CustomPipeline:
             return
         tokenizer = self.tokenizer
         text_embeddings = self.text_encoder.text_model.embeddings
+        ann = None
+        def nearest_words(emb):
+            nonlocal ann
+            n, m = emb.shape
+            if(ann is None):
+                orig_embd_weights = text_embeddings.token_embedding.weight.cpu().numpy()
+                ann = AnnoyIndex(m, "euclidean")
+                st, ed = tokenizer("")["input_ids"]
+                
+                for i in range(max(st, ed)+1):
+                    vec = orig_embd_weights[i]
+                    print("vec id", i, end="\r")
+                    ann.add_item(i, vec)
+                ann.build(5)
+            ret = []
+            for i in range(n):
+                nn = ann.get_nns_by_vector(emb[i], 1)[0]
+                ret.append(nn)
+            return tokenizer.batch_decode(np.array(ret).reshape((1, -1)))
         for i in glob(path.join(self.ti_autoload_path, "*.pt")):
             with locked(self.hijack_lock):
                 if(i in self.ti_loaded):
@@ -170,6 +190,7 @@ class CustomPipeline:
                 pt = torch.load(i)
                 key = next(iter(pt["string_to_param"])) # first element
                 embeddings = pt["string_to_param"][key].cpu().numpy() # (size, 768)
+                
                 placeholder_length, dim = embeddings.shape
                 
                 orig_embd_weights = text_embeddings.token_embedding.weight.cpu().numpy()
@@ -192,8 +213,11 @@ class CustomPipeline:
                 del text_embeddings.token_embedding
                 text_embeddings.token_embedding = nn.Embedding.from_pretrained(embd_weights)
                 print("Textual-Inversion loaded %s -> %s"%(alias_key, alias_value))
+                if(TI_NEAREST_ORIG_WORD):
+                    print(alias_key, "near", nearest_words(embeddings))
                 self.ti_alias[alias_key] = alias_value
                 self.ti_loaded[i] = i
+                
     
     def get_txt2img_multiplier(self, prompt, cfg=7.5, steps=20, width=512, height=768, neg_prompt = "", noise_pred_batch_size=NOISE_PRED_BATCH, use_noise=None, use_noise_alpha=1):
         """
@@ -294,10 +318,11 @@ class CustomPipeline:
                 latents = latents*mask_tensor+latents_proper*(1-mask_tensor)
             latents = 1 / 0.18215 * latents
             image = vae.decode(latents).sample
-
+            del latents
             image = (image / 2 + 0.5).clamp(0, 1)
             image = image.cpu().permute(0, 2, 3, 1).numpy()
             image = self.sd_pipeline.numpy_to_pil(image)
+            torch.cuda.empty_cache()
             return Reproducable(self.inpaint, image[0],
                 prompt, orig_image, mask_image,
                 steps=steps,
@@ -401,6 +426,7 @@ class CustomPipeline:
             image = (image / 2 + 0.5).clamp(0, 1)
             image = image.cpu().permute(0, 2, 3, 1).numpy()
             image = self.sd_pipeline.numpy_to_pil(image)
+            torch.cuda.empty_cache()
             return Reproducable(self.img2img, image[0], orig_image=orig_image, cfg=cfg, steps=steps, alpha=alpha, beta=beta, neg_prompt=neg_prompt, noise_pred_batch_size=noise_pred_batch_size, use_noise=init_noise, use_noise_alpha=1)
 
     def _predict_noise(self, latents, weights, cond_batches, cond_num, noise_pred_batch_size, t):

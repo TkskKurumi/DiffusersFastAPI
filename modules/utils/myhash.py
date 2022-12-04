@@ -23,11 +23,6 @@ def hashi(x, length=40):
     elif(np.issubdtype(type(x), np.floating)):
         x = int(x*1024)
         return hashi(x, length=40)
-    elif (isinstance(x, int)):
-        mask = (1 << length)-1
-        return (x >> length) ^ (x & mask)
-    elif (isinstance(x, float)):
-        return hashi(int(x*10), length)
     elif (isinstance(x, dict)):
         keys = sorted(list(x))
         return hashi([(key, x[key]) for key in keys], length=length)

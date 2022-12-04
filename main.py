@@ -23,7 +23,7 @@ app = FastAPI()
 pool = ThreadPoolExecutor()
 
 DIFFUSION_INFER_LOCK = Lock()
-UPSCALING_INFER_LOCK = Lock()
+UPSCALING_INFER_LOCK = DIFFUSION_INFER_LOCK
 images = {}
 noises = {}
 
@@ -105,7 +105,7 @@ class SRTicket(Ticket):
 
 class IMG2IMGTicket(Ticket):
     tickets = {}
-    STEP = 25
+    STEP = 30
     LOCK = DIFFUSION_INFER_LOCK
     TIMER_KEY = "diffusion_infer_resolution_steps"
     def __init__(self, token=None, strength=0.75):
@@ -148,7 +148,7 @@ class IMG2IMGTicket(Ticket):
         alpha = max(self.params.get("alpha", 0.68), 0.01)
         guidance = self.params.get("guidance") or 7.5/alpha
         eta = self.params.get("ddim_noise", 0) # eta for ddim
-        steps = int(max(25/alpha, IMG2IMGTicket.STEP))
+        steps = int(IMG2IMGTicket.STEP / alpha)
         make_ret = lambda *args, **kwargs:(args, kwargs)
         return make_ret(pro, orig_image, alpha=alpha, steps=steps, neg_prompt=neg_pro, cfg=guidance, eta=eta)
     def get_n(self):
@@ -234,7 +234,7 @@ class TXT2IMGPromptInterp(Ticket):
         cfg = self.params.get("guidance", 12)
         aspect = self.params.get("aspect", 9/16)
         nfr = self.params.get("nframes", 10)
-        steps = 10
+        steps = 12
         if(isinstance(nfr, int)):
             nfr = min(max(nfr, 3), 20)
             res = TXT2IMGPromptInterp.RESOLUTION_STEP_NFRAME/nfr/steps
@@ -284,7 +284,7 @@ class TXT2IMGTicket(Ticket):
     tickets = {}
     TIMER_KEY = "diffusion_infer_resolution_steps"
     LOCK = DIFFUSION_INFER_LOCK
-    STEPS = 30
+    STEPS = 45
 
     def __init__(self, token=None):
         super().__init__("txt2img", token)

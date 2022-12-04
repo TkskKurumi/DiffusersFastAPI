@@ -9,7 +9,7 @@ def pil2jpegbytes(pil: Image.Image):
     pil.save(bio, "PNG")
     bio.seek(0)
     return bio.read()
-DEFAULT_RESOLUTION = 512*512*1.4
+DEFAULT_RESOLUTION = 512*512*1.5
 def normalize_resolution(w, h, resolution=DEFAULT_RESOLUTION, mo=64):
     if(resolution is not None):
         rate = (resolution/w/h)**0.5
