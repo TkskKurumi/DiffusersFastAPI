@@ -155,9 +155,16 @@ class CustomPipeline:
         self.hijack_lock = Lock()
         self.ti_autoload_path = ti_autoload_path
         self.ti_alias = {}
+        self.ti_alias["remote_random"] = self.random_prompt
         self.ti_loaded = {}
         self.ti_ph_assign = NameAssign()
+        self.orig_embd_weights = self.text_encoder.text_model.embeddings.token_embedding.weight.numpy(force=True)
         self.auto_load_ti()
+    def random_prompt(self):
+        st, ed = self.tokenizer("")["input_ids"]
+        hi = min(st, ed)
+        ids = np.random.randint(0, hi, (1, 30))
+        return self.tokenizer.batch_decode(ids)
     @torch.no_grad()
     def auto_load_ti(self):
         if(not self.ti_autoload_path):
@@ -165,11 +172,11 @@ class CustomPipeline:
         tokenizer = self.tokenizer
         text_embeddings = self.text_encoder.text_model.embeddings
         ann = None
+        orig_embd_weights = self.orig_embd_weights
         def nearest_words(emb):
-            nonlocal ann
+            nonlocal ann, orig_embd_weights
             n, m = emb.shape
             if(ann is None):
-                orig_embd_weights = text_embeddings.token_embedding.weight.cpu().numpy()
                 ann = AnnoyIndex(m, "euclidean")
                 st, ed = tokenizer("")["input_ids"]
                 
@@ -183,6 +190,7 @@ class CustomPipeline:
                 nn = ann.get_nns_by_vector(emb[i], 1)[0]
                 ret.append(nn)
             return tokenizer.batch_decode(np.array(ret).reshape((1, -1)))
+        to_cat = []
         for i in glob(path.join(self.ti_autoload_path, "*.pt")):
             with locked(self.hijack_lock):
                 if(i in self.ti_loaded):
@@ -193,7 +201,7 @@ class CustomPipeline:
                 
                 placeholder_length, dim = embeddings.shape
                 
-                orig_embd_weights = text_embeddings.token_embedding.weight.cpu().numpy()
+                # orig_embd_weights = text_embeddings.token_embedding.weight.cpu().numpy()
                 alias_key = pt["name"]
                 alias_value = []
                 for j in range(placeholder_length):
@@ -207,17 +215,20 @@ class CustomPipeline:
                 alias_value = " ".join(alias_value)
                 added_ids = tokenizer(alias_value)["input_ids"]
                 st, ed, added_ids = added_ids[0], added_ids[-1], added_ids[1:-1]
+                to_cat.append(embeddings)
                 
-                embd_weights = np.concatenate([orig_embd_weights, embeddings])
-                embd_weights = torch.tensor(embd_weights).cuda()
-                del text_embeddings.token_embedding
-                text_embeddings.token_embedding = nn.Embedding.from_pretrained(embd_weights)
                 print("Textual-Inversion loaded %s -> %s"%(alias_key, alias_value))
                 if(TI_NEAREST_ORIG_WORD):
                     print(alias_key, "near", nearest_words(embeddings))
                 self.ti_alias[alias_key] = alias_value
                 self.ti_loaded[i] = i
-                
+        if(to_cat):
+            embd_weights = np.concatenate([orig_embd_weights]+to_cat)
+            self.orig_embd_weights = embd_weights
+            embd_weights = torch.tensor(embd_weights).cuda()
+            del text_embeddings.token_embedding
+            text_embeddings.token_embedding = nn.Embedding.from_pretrained(embd_weights)
+
     
     def get_txt2img_multiplier(self, prompt, cfg=7.5, steps=20, width=512, height=768, neg_prompt = "", noise_pred_batch_size=NOISE_PRED_BATCH, use_noise=None, use_noise_alpha=1):
         """
@@ -770,6 +781,8 @@ class CustomPipeline:
         def add_sentence(weight, sentence, spl = True):
             aliases = list(self.ti_alias.items())
             for k, v in sorted(aliases, key=lambda x:-len(x[0])):
+                if(callable(v)):
+                    v = v()
                 if(k in sentence):
                     print("%s -> %s"%(k, v))
                     clear_sentences = sentence.split(k)
