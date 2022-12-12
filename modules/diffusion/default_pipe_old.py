@@ -1,14 +1,16 @@
 from .wrapped_pipeline import CustomPipeline
 from diffusers import StableDiffusionPipeline, DDIMScheduler
 import torch, os
-half_prec = os.environ.get("DIFFUSION_V3_PRECISION", "FULL") == "FULL"
+half_prec = os.environ.get("DIFFUSION_V3_PRECISION", "HALF") == "HALF"
 MODEL_ID = "../Models/SDModel"
 TI_PATH = "../Models/Embeddings"
 VAE_PATH = os.path.join(MODEL_ID, "replaced_vae.pt")
 DEVICE = "cuda"
-
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.benchmark = True
 print("loading model %s" % MODEL_ID)
 if(half_prec):
+    print("fp16")
     pipe = StableDiffusionPipeline.from_pretrained(
     MODEL_ID,
     torch_dtype=torch.float16,
@@ -22,6 +24,7 @@ if(half_prec):
     ),
     ).to(DEVICE)
 else:
+    print("fp32")
     pipe = StableDiffusionPipeline.from_pretrained(
     MODEL_ID,
     revision="fp32",
@@ -33,9 +36,11 @@ else:
         set_alpha_to_one=False,
     ),
     ).to(DEVICE)
+# pipe.enable_sequential_cpu_offload()
 pipe.enable_attention_slicing()
 if(os.path.exists(VAE_PATH)):
     from .load_vae import load_ldm_vae_ckpt
     load_ldm_vae_ckpt(pipe.vae, VAE_PATH)
 
 pipe = CustomPipeline(pipe, ti_autoload_path=TI_PATH)
+# pipe.sd_pipeline.enable_sequential_cpu_offload()
