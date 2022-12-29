@@ -105,7 +105,7 @@ class SRTicket(Ticket):
 
 class IMG2IMGTicket(Ticket):
     tickets = {}
-    STEP = 30
+    STEP = 25
     LOCK = DIFFUSION_INFER_LOCK
     TIMER_KEY = "diffusion_infer_resolution_steps"
     def __init__(self, token=None, strength=0.75):
@@ -284,7 +284,7 @@ class TXT2IMGTicket(Ticket):
     tickets = {}
     TIMER_KEY = "diffusion_infer_resolution_steps"
     LOCK = DIFFUSION_INFER_LOCK
-    STEPS = 45
+    STEPS = 30
 
     def __init__(self, token=None):
         super().__init__("txt2img", token)
@@ -376,7 +376,7 @@ class TXT2IMGTicket(Ticket):
 
 class InpaintTicket(Ticket):
     tickets = {}
-    STEP = 30
+    STEP = 25
     LOCK = DIFFUSION_INFER_LOCK
     TIMER_KEY = "diffusion_infer_resolution_steps"
     def __init__(self, token=None, strength=0.75):
@@ -489,7 +489,15 @@ def get_image(id: str):
         return Response(pil2jpegbytes(images[id]), media_type='image/jpeg')
     else:
         return Response("not found", status_code=404)
-
+@app.post("/upscale")
+def post_upload(data: UploadFile = File()):
+    img = upfile2img(data)
+    w, h = img.size
+    wh = normalize_resolution(w, h, DEFAULT_RESOLUTION, mo=1)
+    img = img.resize(wh, Image.LANCZOS)
+    with locked(UPSCALING_INFER_LOCK):
+        img = upscale(img)
+    return Response(pil2jpegbytes(img), media_type='image/jpeg')
 @app.post("/ticket/{ticket_id}/upload_image")
 def post_upload(ticket_id: str, fn: str="orig_image", data: UploadFile = File()):
     if (ticket_id in Ticket.tickets):
@@ -542,7 +550,13 @@ def post_ticket_param(ticket_id: str, data: TicketParam):
     else:
         ret = {"status": -1, "message": "ticket doesn't exist"}
         return JSONResponse(ret, status_code=404)
-
+@app.get("/misc/get_random_prompt")
+def get_random_prompt():
+    ret = {}
+    data = {"prompt":diffusion_pipe.random_prompt()}
+    ret["data"] = data
+    ret["status"] = 0
+    return JSONResponse(ret, status_code=200)
 
 @app.get("/ticket/create/{purpose}")
 def post_ticket_create(purpose: str):
