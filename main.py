@@ -284,7 +284,7 @@ class TXT2IMGTicket(Ticket):
     tickets = {}
     TIMER_KEY = "diffusion_infer_resolution_steps"
     LOCK = DIFFUSION_INFER_LOCK
-    STEPS = 30
+    STEPS = 40
 
     def __init__(self, token=None):
         super().__init__("txt2img", token)

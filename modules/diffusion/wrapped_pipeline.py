@@ -497,9 +497,10 @@ class CustomPipeline:
             cat_weights1 = np.concatenate([weights0*0, weights1], axis=0)
             len_embd = ids0[0].shape[-1]
             cat_ids = np.concatenate([ids0, ids1], axis=0).reshape((-1, len_embd))
-            cat_ids = torch.tensor(cat_ids).to(text_encoder.device)
+            cat_ids = torch.tensor(cat_ids).cuda()
             print("DEBUG:", cat_ids.shape)
-            conds = text_encoder(cat_ids).last_hidden_state
+            
+            conds = text_encoder(cat_ids)[0]
             conds_batches = split_batch(conds, noise_pred_batch_size)
 
             latents_shape = (1, unet.in_channels, height // 8, width // 8)
@@ -791,11 +792,11 @@ class CustomPipeline:
                             add_sentence(weight, v)
                         add_sentence(weight, i)
                     return
-            
-            if(spl and ", " in sentence):
-                for idx, s in enumerate(sentence.split(", ")):
+            sep = ","
+            if(spl and sep in sentence):
+                for idx, s in enumerate(sentence.split(sep)):
                     if(idx):
-                        add_sentence(weight, ", "+s, spl=False)
+                        add_sentence(weight, sep+s, spl=False)
                     else:
                         add_sentence(weight, s, spl=False)
                 return
@@ -804,6 +805,7 @@ class CustomPipeline:
             if(len(ids)<=max_length-2):
                 add_ids(weight, *ids)
             else:
+                print("TOO LONG", sentence)
                 for id in ids:
                     add_ids(weight, id)
         if(isinstance(prompt, str)):
@@ -812,6 +814,7 @@ class CustomPipeline:
             wp = prompt
         extra_bucket = True
         while(extra_bucket):
+            LIMIT = 30
             extra_bucket = False
         
             for idx, b in enumerate(buckets):
@@ -821,7 +824,12 @@ class CustomPipeline:
                 add_sentence(w, s)
                 m = len(buckets)
                 extra_bucket = extra_bucket or (n!=m)
-                
+            if(len(buckets)>=LIMIT):
+                f_used = lambda u:u**0.1
+                weights = np.array([b.weight*f_used(b.used) for b in buckets])
+                ids = [b.ids for b in buckets]
+                self.debug_ids(weights, ids)
+                assert len(buckets) < LIMIT
         f_used = lambda u:u**0.1
 
         weights = np.array([b.weight*f_used(b.used) for b in buckets])

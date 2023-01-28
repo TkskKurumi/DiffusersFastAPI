@@ -9,10 +9,12 @@ DEVICE = "cuda"
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.benchmark = True
 print("loading model %s" % MODEL_ID)
-if(True):
+if(False):
     sched = DPMSolverMultistepScheduler(
         beta_schedule="scaled_linear",
-        solver_order=3
+        solver_order=3,
+        beta_start=0.00085,
+        beta_end=0.012,
     )
 else:
     sched = DDIMScheduler(

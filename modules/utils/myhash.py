@@ -28,5 +28,7 @@ def hashi(x, length=40):
         return hashi([(key, x[key]) for key in keys], length=length)
     elif (isinstance(x, str)):
         return hashi([ord(i) for i in x], length=length)
+    elif (x is None):
+        return 0
     else:
         raise TypeError(type(x))
