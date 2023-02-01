@@ -191,6 +191,7 @@ class CustomPipeline:
                 ret.append(nn)
             return tokenizer.batch_decode(np.array(ret).reshape((1, -1)))
         to_cat = []
+        mes = []
         for i in glob(path.join(self.ti_autoload_path, "*.pt")):
             with locked(self.hijack_lock):
                 if(i in self.ti_loaded):
@@ -216,12 +217,13 @@ class CustomPipeline:
                 added_ids = tokenizer(alias_value)["input_ids"]
                 st, ed, added_ids = added_ids[0], added_ids[-1], added_ids[1:-1]
                 to_cat.append(embeddings)
-                
-                print("Textual-Inversion loaded %s -> %s"%(alias_key, alias_value))
+                mes.append("%s -> %s"%(alias_key, alias_value))
                 if(TI_NEAREST_ORIG_WORD):
                     print(alias_key, "near", nearest_words(embeddings))
                 self.ti_alias[alias_key] = alias_value
                 self.ti_loaded[i] = i
+        if(mes):
+            print(*mes, sep=", ")
         if(to_cat):
             embd_weights = np.concatenate([orig_embd_weights]+to_cat)
             self.orig_embd_weights = embd_weights
