@@ -309,7 +309,7 @@ class CustomPipeline:
             
             timesteps = sched.timesteps[0:].to(self.device)
             if(True):
-                it = enumerate(self.sd_pipeline.progress_bar(timesteps))
+                it = list(enumerate(self.sd_pipeline.progress_bar(timesteps)))
             else:
                 it = enumerate(timesteps)
 
@@ -319,7 +319,11 @@ class CustomPipeline:
                 mask_tensor = torch.from_numpy(mask_numpy).cuda()
             for i, t in it:
                 noise_pred = self._predict_noise(latents, weights, cond_batches, nconds, noise_pred_batch_size, t)
-                latents_proper = sched.add_noise(orig_latents, noise, torch.tensor([t]))
+                if(i==len(it)-1):
+                    latents_proper = orig_latents
+                else:
+                    _, pt = it[i+1]
+                    latents_proper = sched.add_noise(orig_latents, noise, torch.tensor([pt]))
                 latents = sched.step(noise_pred, t, latents).prev_sample
                 if(mode==0):
                     pass
