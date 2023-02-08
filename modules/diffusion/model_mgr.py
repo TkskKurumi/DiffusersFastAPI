@@ -95,7 +95,7 @@ MASTER_MODEL: CustomPipeline = None
 TI_PATH = "../Models/Embeddings"
 LOADED_VAES = None
 LOADED_UNETS = None
-def get_model(unets=None, vaes=None):
+def get_model(unets=None, vaes=None, offload=True):
     with locked(MODEL_LOADER_LOCK), print_time("get model"):
         global MASTER_MODEL, LOADED_UNETS, LOADED_VAES
         if(MASTER_MODEL is None):
@@ -130,13 +130,14 @@ def get_model(unets=None, vaes=None):
                     interpolate_into(MASTER_MODEL.sd_pipeline.vae, *vaes)
             debug_vram("after interp")
         p = MASTER_MODEL.sd_pipeline
-        cnt = 0
-        for model in [p.text_encoder, p.safety_checker]:
-            if(model is not None):
-                if(str(model.device)=="cuda:0"):
-                    cnt += 1
-                    cpu_offload(model, "cuda:0")
-        print("offload %d models to cpu"%cnt)
+        if(offload):
+            cnt = 0
+            for model in [p.text_encoder, p.safety_checker]:
+                if(model is not None):
+                    if(str(model.device)=="cuda:0"):
+                        cnt += 1
+                        cpu_offload(model, "cuda:0")
+            print("offload %d models to cpu"%cnt)
         print(LOADED_UNETS, LOADED_VAES)
         return MASTER_MODEL
 class PipeDummy:
@@ -156,6 +157,8 @@ default_unets = [(40, "PastelMix"), (20, "Counterfeit"), (20, "CF2.2"), (10, "Ei
 default_vaes = [(1, "AOM"), (9, "PastelMix")]
 default_unets = [(w, k) for w, k in default_unets if k in models] or None
 default_vaes = [(w, k) for w, k in default_vaes if k in models] or None
-get_model(default_unets, default_vaes)
+
 if(__name__=="__main__"):
+    get_model(default_unets, default_vaes, offload=False)
     MASTER_MODEL.sd_pipeline.save_pretrained("../Models/KurumiMix")
+get_model(default_unets, default_vaes)
