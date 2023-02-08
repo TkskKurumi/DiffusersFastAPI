@@ -13,7 +13,7 @@ from diffusers import StableDiffusionPipeline
 from modules.utils.myhash import hashi
 from modules.utils import pil2jpegbytes, normalize_resolution
 from modules.utils.misc import default_neg_prompt, upfile2img, DEFAULT_RESOLUTION
-from modules.diffusion.default_pipe import pipe as diffusion_pipe
+from modules.diffusion.model_mgr import pipe as diffusion_pipe, models, get_model
 from modules.superres import upscale
 from PIL import Image
 import numpy as np
@@ -290,9 +290,32 @@ class TXT2IMGTicket(Ticket):
         super().__init__("txt2img", token)
         TXT2IMGTicket.tickets[self.id] = self
         self.params = {}
+    def interp_model(self):
+        unets = None
+        if(self.params.get("unets")):
+            unets = self.params["unets"]
+            ls = []
+            for i in unets.split(","):
+                w, model_id = i.split(":")
+                assert(model_id in models)
+                w = float(w)
+                ls.append((w, model_id))
+            unets = ls
+        vaes = None
+        if(self.params.get("vaes")):
+            vaes = self.params["vaes"]
+            ls = []
+            for i in vaes.split(","):
+                w, model_id = i.split(":")
+                assert(model_id in models)
+                w = float(w)
+                ls.append((w, model_id))
+            vaes = ls
+        pipe = get_model(unets, vaes)
+        return pipe
     @property
     def accepted_params(self):
-        return ["prompt", "neg_prompt", "guidance", "aspect", "use_noise", "fast_eval", "use_noise_alpha"] 
+        return ["prompt", "neg_prompt", "guidance", "aspect", "use_noise", "fast_eval", "use_noise_alpha", "unets", "vaes"] 
     def param(self, **kwargs):
         for key in self.accepted_params:
             if (key in kwargs):
@@ -351,6 +374,7 @@ class TXT2IMGTicket(Ticket):
                 self.status = TicketStatus.RUNNING
                 args, kwargs = self.form_pipe_kwargs()
                 with locked(TXT2IMGTicket.LOCK):
+                    self.interp_model()
                     rep = diffusion_pipe.txt2img(*args, **kwargs)
                 img = rep.result
                 with locked(DIFFUSION_INFER_LOCK):
@@ -465,6 +489,8 @@ class TicketParam(BaseModel):
     fast_eval: bool = False
     mode: int = 0
     ddim_noise : float = 0
+    unets: str | NoneType = None
+    vaes: str | NoneType = None
 def serialize_response(resp):
     if(isinstance(resp, list)):
         return [serialize_response(i) for i in resp]
@@ -508,6 +534,11 @@ def post_upload(ticket_id: str, fn: str="orig_image", data: UploadFile = File())
     else:
         ret = {"status": -404, "message": "ticket doesn't exist"}
         return JSONResponse(ret, status_code=404)
+@app.get("/ticket/{ticket_id}/del")
+def del_ticket(ticket_id):
+    for cls in [Ticket, TXT2IMGTicket, IMG2IMGTicket, InpaintTicket, TXT2IMGPromptInterp]:
+        cls.tickets.pop(ticket_id, None)
+    return JSONResponse({"status":0}, status_code=200)
 @app.get("/ticket/{ticket_id}/result")
 def get_ticket_result(ticket_id: str):
     if (ticket_id in Ticket.tickets):
@@ -556,6 +587,14 @@ def get_random_prompt():
     data = {"prompt":diffusion_pipe.random_prompt()}
     ret["data"] = data
     ret["status"] = 0
+    return JSONResponse(ret, status_code=200)
+
+@app.get("/list_models")
+def get_list_models():
+    ret = {}
+    data = {"models": list(models)}
+    ret["status"] = 0
+    ret["data"] = data
     return JSONResponse(ret, status_code=200)
 
 @app.get("/ticket/create/{purpose}")

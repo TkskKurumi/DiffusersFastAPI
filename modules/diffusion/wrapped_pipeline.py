@@ -18,6 +18,7 @@ from ..utils.lcs import LCS
 import os
 from typing import Callable, Iterable, Dict, Union, List
 from annoy import AnnoyIndex
+import safetensors
 def combine_noise(noise: torch.tensor, use_noise:np.ndarray, use_noise_alpha:float):
     dtype = noise.dtype
     device = noise.device
@@ -160,6 +161,7 @@ class CustomPipeline:
         self.ti_ph_assign = NameAssign()
         self.orig_embd_weights = self.text_encoder.text_model.embeddings.token_embedding.weight.numpy(force=True)
         self.auto_load_ti()
+        self.inference_lock = Lock()
     def random_prompt(self):
         st, ed = self.tokenizer("")["input_ids"]
         hi = min(st, ed)
@@ -192,11 +194,27 @@ class CustomPipeline:
             return tokenizer.batch_decode(np.array(ret).reshape((1, -1)))
         to_cat = []
         mes = []
-        for i in glob(path.join(self.ti_autoload_path, "*.pt")):
+        ls = list(glob(path.join(self.ti_autoload_path, "*.pt")))
+        ls.extend(glob(path.join(self.ti_autoload_path, "*.safetensors")))
+
+        for i in ls:
             with locked(self.hijack_lock):
                 if(i in self.ti_loaded):
                     continue
-                pt = torch.load(i)
+                if(i.endswith("pt")):
+                    pt = torch.load(i)
+                else:
+                    
+                    pt = {}
+                    with safetensors.safe_open(i, framework="pt", device="cpu") as f:
+                        for k in f.keys():
+                            pt[k] = f.get_tensor(k)
+                    if("emb_params" in pt):
+                        bn = path.splitext(path.basename(i))[0]
+                        pt["string_to_param"] = {"bn": pt["emb_params"]}
+                        pt["name"] = bn
+                    else:
+                        print(list(pt))
                 key = next(iter(pt["string_to_param"])) # first element
                 embeddings = pt["string_to_param"][key].cpu().numpy() # (size, 768)
                 
@@ -217,7 +235,7 @@ class CustomPipeline:
                 added_ids = tokenizer(alias_value)["input_ids"]
                 st, ed, added_ids = added_ids[0], added_ids[-1], added_ids[1:-1]
                 to_cat.append(embeddings)
-                mes.append("%s -> %s"%(alias_key, alias_value))
+                mes.append("%s"%(alias_key,))
                 if(TI_NEAREST_ORIG_WORD):
                     print(alias_key, "near", nearest_words(embeddings))
                 self.ti_alias[alias_key] = alias_value
@@ -254,9 +272,10 @@ class CustomPipeline:
         nweights = len(weights)
         w, h = preprocess_image(orig_image).size
         return w*h*nweights*steps
+    
     @torch.no_grad()
     def inpaint(self, prompt, orig_image, mask_image, cfg=7.5, steps=20, neg_prompt="", noise_pred_batch_size=NOISE_PRED_BATCH, use_noise=None, use_noise_alpha=1, mode=1):
-        with torch.autocast("cuda"):
+        with torch.autocast("cuda"), locked(self.inference_lock):
             text_encoder = self.text_encoder
             unet = self.unet
             sched = self.sched
@@ -357,7 +376,7 @@ class CustomPipeline:
         """
         alpha: the rate of num_denoising_step/steps
         """
-        with torch.autocast("cuda"):
+        with torch.autocast("cuda"), locked(self.inference_lock):
             text_encoder = self.text_encoder
             unet = self.unet
             sched = self.sched
@@ -485,7 +504,7 @@ class CustomPipeline:
         return nweights*width*height*steps*nfr
     @torch.no_grad()
     def txt2img_interpolation(self, prompt0, prompt1, cfg=7.5, steps=15, nframes=10, width=512, height=512, noise_pred_batch_size=NOISE_PRED_BATCH, return_noise = False, use_noise=None, use_noise_alpha=1):
-        with torch.autocast("cuda"):
+        with torch.autocast("cuda"), locked(self.inference_lock):
             text_encoder = self.text_encoder
             unet = self.unet
             sched = self.sched
@@ -569,7 +588,7 @@ class CustomPipeline:
             
     @torch.no_grad()
     def txt2img(self, prompt, cfg=7.5, steps=20, width=512, height=768, neg_prompt = "", noise_pred_batch_size=2, return_noise=False, use_noise=None, use_noise_alpha=1):
-        with torch.autocast("cuda"):
+        with torch.autocast("cuda"), locked(self.inference_lock):
             debug_vram("before txt2img")
             text_encoder = self.text_encoder
             unet = self.unet
