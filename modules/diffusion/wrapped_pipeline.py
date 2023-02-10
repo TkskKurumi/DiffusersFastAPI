@@ -589,7 +589,7 @@ class CustomPipeline:
     @torch.no_grad()
     def txt2img(self, prompt, cfg=7.5, steps=20, width=512, height=768, neg_prompt = "", noise_pred_batch_size=2, return_noise=False, use_noise=None, use_noise_alpha=1):
         with torch.autocast("cuda"), locked(self.inference_lock):
-            debug_vram("before txt2img")
+
             text_encoder = self.text_encoder
             unet = self.unet
             sched = self.sched
@@ -640,9 +640,9 @@ class CustomPipeline:
             image = (image / 2 + 0.5).clamp(0, 1)
             image = image.cpu().permute(0, 2, 3, 1).numpy()
             image = self.sd_pipeline.numpy_to_pil(image)
-            debug_vram("after txt2img")
+            
             torch.cuda.empty_cache()
-            debug_vram("after txt2img empty cache")
+            debug_vram("after txt2img")
             return Reproducable(self.txt2img, image[0], prompt, cfg=cfg, steps=steps, width=width, height=height, neg_prompt=neg_prompt, noise_pred_batch_size=noise_pred_batch_size, use_noise=init_noise, use_noise_alpha=1)
 
     def debug_ids(self, weights, ids):

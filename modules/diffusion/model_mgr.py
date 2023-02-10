@@ -47,7 +47,7 @@ _INFER_MODEL: StableDiffusionPipeline = None
 MODEL_LOADER_LOCK = Lock()
 
 def _load_model(model_id):
-    if(model_id.endswith(".pt")):
+    if(model_id.endswith("pt")):
         model = load_pipeline_from_original_stable_diffusion_ckpt(
             model_id, 
             prediction_type="epsilon",
@@ -75,8 +75,8 @@ def load_model(name, model_id="", vae=""):
             model_id = name
         # save vram
         print("loading model %s"%name)
-        debug_vram("before load model %s"%name)
-        model = _load_model(model_id).to(torch.float16).to("cpu")
+        # debug_vram("before load model %s"%name)
+        model = _load_model(model_id).to("cpu")
         model.enable_xformers_memory_efficient_attention()
         if(_INFER_MODEL is None):
             print("loading model %s as base model"%name)
@@ -87,8 +87,9 @@ def load_model(name, model_id="", vae=""):
             device = "cuda:0"
         if(path.exists(vae)):
             load_ldm_vae_ckpt(model.vae, vae)
-        debug_vram("after load model %s"%name)
+        # debug_vram("after load model %s"%name)
         models[name] = model
+        return model
         
 
 MASTER_MODEL: CustomPipeline = None
@@ -103,8 +104,11 @@ def get_model(unets=None, vaes=None):
                 unets = [(1, i) for i in models]
             if(vaes is None):
                 vaes = [(1, i) for i in models]
+            if((not unets)or(not vaes)):
+                print("no model loaded")
+                return MASTER_MODEL
             MASTER_MODEL = CustomPipeline(_INFER_MODEL, TI_PATH)
-            debug_vram("before interp")
+            # debug_vram("before interp")
             with locked(MASTER_MODEL.hijack_lock):
                 print("interpolating models")
                 LOADED_UNETS = unets
@@ -113,10 +117,10 @@ def get_model(unets=None, vaes=None):
                 vaes = [(w, models[i].vae) for w, i in vaes]
                 interpolate_into(MASTER_MODEL.sd_pipeline.unet, *unets)
                 interpolate_into(MASTER_MODEL.sd_pipeline.vae, *vaes)
-            debug_vram("after interp")
+            # debug_vram("after interp")
         elif(unets or vaes):
             assert isinstance(MASTER_MODEL, CustomPipeline)
-            debug_vram("before interp")
+            # debug_vram("before interp")
             with locked(MASTER_MODEL.hijack_lock):
                 print("interpolating models")
                 if(unets and unets!=LOADED_UNETS):
@@ -144,10 +148,11 @@ class PipeDummy:
         return getattr(get_model(), name)
 
 
-model_ids = os.environ.get("DIFFUSION_MODELS").split(",")
+model_ids = os.environ.get("DIFFUSION_MODELS", "").split(",")
 for i in model_ids:
-    i = i.split(":")
-    load_model(*i)
+    if(i):
+        i = i.split(":")
+        load_model(*i)
 
 
 pipe = PipeDummy()
