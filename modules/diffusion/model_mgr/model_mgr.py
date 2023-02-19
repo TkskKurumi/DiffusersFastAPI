@@ -1,16 +1,16 @@
 import os
-from ..utils.debug_vram import debug_vram
+from ...utils.debug_vram import debug_vram
 from diffusers.pipelines.stable_diffusion.convert_from_ckpt import load_pipeline_from_original_stable_diffusion_ckpt
 from accelerate import cpu_offload
 from accelerate.hooks import remove_hook_from_module
 from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
 import torch
-from .wrapped_pipeline import CustomPipeline
+from ..wrapped_pipeline import CustomPipeline
 from threading import Lock
 from torch.nn import Module
 from os import path
-from ..utils.candy import locked, print_time
-from .load_vae import load_ldm_vae_ckpt
+from ...utils.candy import locked, print_time
+from ..load_vae import load_ldm_vae_ckpt
 models = {}
 
 @torch.no_grad()
@@ -94,6 +94,7 @@ def load_model(name, model_id="", vae=""):
 
 MASTER_MODEL: CustomPipeline = None
 TI_PATH = "../Models/Embeddings"
+LR_PATH = "../Models/LoRA"
 LOADED_VAES = None
 LOADED_UNETS = None
 def get_model(unets=None, vaes=None):
@@ -107,7 +108,7 @@ def get_model(unets=None, vaes=None):
             if((not unets)or(not vaes)):
                 print("no model loaded")
                 return MASTER_MODEL
-            MASTER_MODEL = CustomPipeline(_INFER_MODEL, TI_PATH)
+            MASTER_MODEL = CustomPipeline(_INFER_MODEL, TI_PATH, LR_PATH)
             # debug_vram("before interp")
             with locked(MASTER_MODEL.hijack_lock):
                 print("interpolating models")
@@ -157,10 +158,10 @@ for i in model_ids:
 
 pipe = PipeDummy()
 
-default_unets = [(40, "PastelMix"), (20, "Counterfeit"), (20, "CF2.2"), (10, "Eimis"), (5, "Basil"), (5, "AOM")]
-default_vaes = [(1, "AOM"), (9, "PastelMix")]
-default_unets = [(w, k) for w, k in default_unets if k in models] or None
-default_vaes = [(w, k) for w, k in default_vaes if k in models] or None
-get_model(default_unets, default_vaes)
-if(__name__=="__main__"):
-    MASTER_MODEL.sd_pipeline.save_pretrained("../Models/KurumiMix")
+# default_unets = [(40, "PastelMix"), (20, "Counterfeit"), (20, "CF2.2"), (10, "Eimis"), (5, "Basil"), (5, "AOM")]
+# default_vaes = [(1, "AOM"), (9, "PastelMix")]
+# default_unets = [(w, k) for w, k in default_unets if k in models] or None
+# default_vaes = [(w, k) for w, k in default_vaes if k in models] or None
+# get_model(default_unets, default_vaes)
+# if(__name__=="__main__"):
+#     MASTER_MODEL.sd_pipeline.save_pretrained("../Models/KurumiMix")

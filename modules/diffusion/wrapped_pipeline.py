@@ -2,6 +2,7 @@ from .parse_weights import WeightedPrompt
 from dataclasses import dataclass
 from .misc import normalize_weights
 from ..utils.debug_vram import debug_vram
+from ..utils.load_tensor import load as load_tensor
 from diffusers import StableDiffusionPipeline
 from functools import partial
 import numpy as np
@@ -19,6 +20,7 @@ import os
 from typing import Callable, Iterable, Dict, Union, List
 from annoy import AnnoyIndex
 import safetensors
+from .model_mgr import LoRA
 def combine_noise(noise: torch.tensor, use_noise:np.ndarray, use_noise_alpha:float):
     dtype = noise.dtype
     device = noise.device
@@ -139,7 +141,7 @@ def split_batch(inp, batch_size=0, torch_cat=False):
     return ret
 TI_NEAREST_ORIG_WORD = False
 class CustomPipeline:
-    def __init__(self, sd_pipeline: StableDiffusionPipeline, ti_autoload_path=None):
+    def __init__(self, sd_pipeline: StableDiffusionPipeline, ti_autoload_path=None, lora_load_path=None):
         self.sd_pipeline = sd_pipeline
         
         self.raw_tokenize = partial(sd_pipeline.tokenizer,
@@ -155,18 +157,54 @@ class CustomPipeline:
 
         self.hijack_lock = Lock()
         self.ti_autoload_path = ti_autoload_path
+        self.lora_load_path = lora_load_path
         self.ti_alias = {}
         self.ti_alias["remote_random"] = self.random_prompt
         self.ti_loaded = {}
+        self.loras = {}
         self.ti_ph_assign = NameAssign()
         self.orig_embd_weights = self.text_encoder.text_model.embeddings.token_embedding.weight.numpy(force=True)
         self.auto_load_ti()
+        
+        self.auto_load_lora()
         self.inference_lock = Lock()
     def random_prompt(self):
         st, ed = self.tokenizer("")["input_ids"]
         hi = min(st, ed)
         ids = np.random.randint(0, hi, (1, 30))
         return self.tokenizer.batch_decode(ids)
+    @torch.no_grad()
+    def auto_load_lora(self):
+        if(not self.ti_autoload_path):
+            return
+        pth = path.join(self.lora_load_path)
+        files = list()
+        files.extend(glob(path.join(pth, "*.pt")))
+        files.extend(glob(path.join(pth, "*.safetensors")))
+        exists = {}
+        for i in files:
+            name = path.splitext(path.basename(i))[0]
+            if(name in self.loras):
+                exists[name] = True
+                continue
+            pt = load_tensor(i)
+            self.loras[name] = pt
+            exists[name] = True
+        for k in list(self.loras):
+            if(k not in exists):
+                self.loras.pop(k)
+    def wrap_lora(self, *args):
+        self.auto_load_lora()
+        state_dicts = []
+        scales = []
+        for w, name in args:
+            if(name in self.loras):
+                state_dicts.append(self.loras[name])
+                scales.append(w)
+        if(state_dicts):
+            return LoRA.WrapLoRAUNet(self.unet, state_dicts, scales), LoRA.WrapLoRATextEncoder(self.text_encoder, state_dicts, scales)
+        else:
+            return LoRA.Empty(), LoRA.Empty()
     @torch.no_grad()
     def auto_load_ti(self):
         if(not self.ti_autoload_path):

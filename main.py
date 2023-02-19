@@ -114,13 +114,26 @@ class IMG2IMGTicket(Ticket):
         self.params = {}
     @property
     def accepted_params(self):
-        return ["prompt", "neg_prompt", "guidance", "alpha", "ddim_noise"]
+        return ["prompt", "neg_prompt", "guidance", "alpha", "ddim_noise", "loras"]
     def param(self, **kwargs):
         for key in self.accepted_params:
             if (key in kwargs):
                 self.params[key] = kwargs[key]
         if ("neg_prompt" not in self.params):
             self.params["neg_prompt"] = default_neg_prompt()
+    def wrap_lora(self):
+        param_loras = self.params.get("loras", "")
+        loras = []
+        if(param_loras):
+            for i in param_loras.split(","):
+                spl = i.split(":")
+                if(len(spl) == 2):
+                    w, name = spl
+                    loras.append((float(w), name))
+                else:
+                    name = spl[0]
+                    loras.append((1, name))
+        return diffusion_pipe.wrap_lora(*loras)
     def __str__(self):
         ret = []
         for key in self.accepted_params:
@@ -161,7 +174,9 @@ class IMG2IMGTicket(Ticket):
                 self.status = TicketStatus.RUNNING
                 args, kwargs = self.form_pipe_kwargs()
                 with locked(DIFFUSION_INFER_LOCK):
-                    rep = diffusion_pipe.img2img(*args, **kwargs)
+                    a, b = self.wrap_lora()
+                    with a, b:
+                        rep = diffusion_pipe.img2img(*args, **kwargs)
                 img = rep.result
                 with locked(UPSCALING_INFER_LOCK):
                     img = upscale(img)
@@ -290,6 +305,21 @@ class TXT2IMGTicket(Ticket):
         super().__init__("txt2img", token)
         TXT2IMGTicket.tickets[self.id] = self
         self.params = {}
+    def wrap_lora(self):
+        param_loras = self.params.get("loras", "")
+        loras = []
+        if(param_loras):
+            for i in param_loras.split(","):
+                spl = i.split(":")
+                if(len(spl) == 2):
+                    w, name = spl
+                    loras.append((float(w), name))
+                else:
+                    name = spl[0]
+                    loras.append((1, name))
+        return self.interp_model().wrap_lora(*loras)
+
+
     def interp_model(self):
         unets = None
         if(self.params.get("unets")):
@@ -315,7 +345,7 @@ class TXT2IMGTicket(Ticket):
         return pipe
     @property
     def accepted_params(self):
-        return ["prompt", "neg_prompt", "guidance", "aspect", "use_noise", "fast_eval", "use_noise_alpha", "unets", "vaes"] 
+        return ["prompt", "neg_prompt", "guidance", "aspect", "use_noise", "fast_eval", "use_noise_alpha", "unets", "vaes", "loras"] 
     def param(self, **kwargs):
         for key in self.accepted_params:
             if (key in kwargs):
@@ -369,13 +399,16 @@ class TXT2IMGTicket(Ticket):
         return make_ret(pro, neg_prompt = neg, cfg=cfg, width=wid, height=hei, steps=steps, use_noise=use_noise, use_noise_alpha=use_noise_alpha)
     def run(self):
         t = Timer(TXT2IMGTicket.TIMER_KEY, self.get_n())
+        
         try:
             with t:
                 self.status = TicketStatus.RUNNING
                 args, kwargs = self.form_pipe_kwargs()
                 with locked(TXT2IMGTicket.LOCK):
                     self.interp_model()
-                    rep = diffusion_pipe.txt2img(*args, **kwargs)
+                    unet_wrapper, te_wrapper = self.wrap_lora()
+                    with unet_wrapper, te_wrapper:
+                        rep = diffusion_pipe.txt2img(*args, **kwargs)
                 img = rep.result
                 with locked(DIFFUSION_INFER_LOCK):
                     img = upscale(img)
@@ -409,7 +442,7 @@ class InpaintTicket(Ticket):
         self.params = {}
     @property
     def accepted_params(self):
-        return ["prompt", "neg_prompt", "guidance", "alpha", "mode"]
+        return ["prompt", "neg_prompt", "guidance", "alpha", "mode", "loras"]
     def param(self, **kwargs):
         for key in self.accepted_params:
             if (key in kwargs):
@@ -491,6 +524,7 @@ class TicketParam(BaseModel):
     ddim_noise : float = 0
     unets: str | NoneType = None
     vaes: str | NoneType = None
+    loras: str | NoneType = None
 def serialize_response(resp):
     if(isinstance(resp, list)):
         return [serialize_response(i) for i in resp]
@@ -588,7 +622,17 @@ def get_random_prompt():
     ret["data"] = data
     ret["status"] = 0
     return JSONResponse(ret, status_code=200)
+@app.get("/status")
+def get_status():
+    data = {}
+    data["models"] = list(models)
+    data["loras"] = list(diffusion_pipe.loras)
 
+    ret = {}
+    ret["status"] = 0
+    ret["data"] = data
+
+    return JSONResponse(ret, status_code=200)
 @app.get("/list_models")
 def get_list_models():
     ret = {}
