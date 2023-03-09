@@ -136,12 +136,12 @@ def get_model(unets=None, vaes=None):
             debug_vram("after interp")
         p = MASTER_MODEL.sd_pipeline
         cnt = 0
-        for model in [p.text_encoder, p.safety_checker]:
-            if(model is not None):
-                if(str(model.device)=="cuda:0"):
-                    cnt += 1
-                    cpu_offload(model, "cuda:0")
-        print("offload %d models to cpu"%cnt)
+        # for model in [p.text_encoder, p.safety_checker]:
+        #     if(model is not None):
+        #         if(str(model.device)=="cuda:0"):
+        #             cnt += 1
+        #             cpu_offload(model, "cuda:0")
+        # print("offload %d models to cpu"%cnt)
         print(LOADED_UNETS, LOADED_VAES)
         return MASTER_MODEL
 class PipeDummy:

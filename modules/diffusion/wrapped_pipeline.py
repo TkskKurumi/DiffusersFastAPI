@@ -18,7 +18,6 @@ from math import log, ceil, sqrt
 from ..utils.lcs import LCS
 import os
 from typing import Callable, Iterable, Dict, Union, List
-from annoy import AnnoyIndex
 import safetensors
 from .model_mgr import LoRA
 def combine_noise(noise: torch.tensor, use_noise:np.ndarray, use_noise_alpha:float):
@@ -175,7 +174,7 @@ class CustomPipeline:
         return self.tokenizer.batch_decode(ids)
     @torch.no_grad()
     def auto_load_lora(self):
-        if(not self.ti_autoload_path):
+        if(not self.lora_load_path):
             return
         pth = path.join(self.lora_load_path)
         files = list()
@@ -217,6 +216,7 @@ class CustomPipeline:
             nonlocal ann, orig_embd_weights
             n, m = emb.shape
             if(ann is None):
+                from annoy import AnnoyIndex
                 ann = AnnoyIndex(m, "euclidean")
                 st, ed = tokenizer("")["input_ids"]
                 
