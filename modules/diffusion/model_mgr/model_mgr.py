@@ -52,7 +52,7 @@ def _load_model(model_id):
             model_id, 
             prediction_type="epsilon",
             scheduler_type="ddim",
-            original_config_file="../Models/LdmModels/v1-inference.yaml"
+            original_config_file="./v1-inference.yaml"
         )
         model.scheduler = sched
     elif(model_id.endswith(".safetensors")):
@@ -61,7 +61,7 @@ def _load_model(model_id):
             prediction_type="epsilon",
             scheduler_type="ddim",
             from_safetensors=True,
-            original_config_file="../Models/LdmModels/v1-inference.yaml"
+            original_config_file="./v1-inference.yaml"
         )
         model.scheduler = sched
     else:
