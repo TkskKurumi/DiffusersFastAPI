@@ -1,0 +1,87 @@
+[
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "masterpiece, best quality, cinematic lighting, pink hair, white hair, 1girl, incredibly absurdres"
+        }, 
+        "negative_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "masterpiece, best quality, cinematic lighting, incredibly absurdres, ultra-detailed illutration, cityscape, cyber punk, neon light, latx bodysuit, swimsuit, extremely delicate and beautiful girl"
+        }, 
+        "negative_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "masterpiece, best quality, cinematic lighting, blue hair, aqua hair, 1girl, incredibly absurdres"
+        }, 
+        "negative_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "masterpiece, best quality, cinematic lighting, incredibly absurdres, black hair, red streaked hair, serafuku, frills, bow"
+        }, 
+        "negative_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "intricate detail, ultra-detailed illustration, well drawn, extremely delicate and beautiful, best quality, incredibly absurdres, highres, high quality, white hair, blue hair, green hair, pink hair, red hair, purple hair, black eyes, red eyes, blue eyes, serafuku, sailor collar, frilled dress, layered dress, bridal veil"
+        }, 
+        "negative_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "missing fingers, extra fingers, missing legs, extra legs, extra arms, bad hands, worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, simple background, monochrome"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "intricate detail, ultra-detailed illustration, well drawn, extremely delicate and beautiful, best quality, incredibly absurdres, highres, high quality, serafuku, sailor collar, frilled dress, layered dress, bridal veil, grass lands, forest, trees, palm trees, beach, outdoors"
+        }, 
+        "negative_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "missing fingers, extra fingers, missing legs, extra legs, extra arms, bad hands, worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, simple background, monochrome"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "intricate detail, ultra-detailed illustration, well drawn, extremely delicate and beautiful, best quality, incredibly absurdres, highres, high quality, black dress, layered dress, black dress with gold trim, intricate detailed lace trim, cross-laced, criss-cross halter, halterneck, layered dress"
+        }, 
+        "negative_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "missing fingers, extra fingers, missing legs, extra legs, extra arms, bad hands, worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, simple background, monochrome"
+        }
+    }
+    
+]

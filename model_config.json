@@ -1,0 +1,13 @@
+[
+    {
+        "pth": "../Models/LdmModels/AOM3.safetensors"
+    },
+    {
+        "pth": "/root/autodl-tmp/meinamix_meinaV7.safetensors",
+        "vae": "/root/autodl-tmp/AnythingV3/Anything-V3.0.vae.pt"
+    },
+    {
+        "pth": "/root/DiffusersFastAPI/DiffusersFastAPI/rmhf.safetensors",
+        "vae": "/root/DiffusersFastAPI/Models/LdmModels/pastel-waifu-diffusion.vae.pt"
+    }
+]
