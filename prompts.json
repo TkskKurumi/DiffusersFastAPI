@@ -2,25 +2,25 @@
     {
         "prompt_sample": {
             "sep": ", ",
-            "num": 20,
-            "from": "masterpiece, best quality, cinematic lighting, pink hair, 1girl, incredibly absurdres, cat ears, blue eyes, red eyes, heterochromia, serafuku, cute, petite, loli, little girl, school girl, medium breasts, navel"
+            "num": 25,
+            "from": "ultra-detailed illustration, extremely detailed, beautifully drawn, well drawn, masterpiece, best quality, cinematic lighting, pink hair, 1girl, incredibly absurdres, cat ears, blue eyes, red eyes, heterochromia, serafuku, cute, petite, loli, little girl, school girl, medium breasts, navel"
         },
         "negative_sample": {
             "sep": ", ",
-            "num": 10,
-            "from": "worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, small breasts, huge breasts"
+            "num": 25,
+            "from": "pussy, nipples, nsfw, naked, topless, bottomless, lowres, blurry, low quality, worst quality, bad quality, bad anatomy, bad proportion, bad perspective, poorly drawn, sketch"
         }
     },
     {
         "prompt_sample": {
             "sep": ", ",
-            "num": 10,
-            "from": "masterpiece, best quality, cinematic lighting, incredibly absurdres, ultra-detailed illutration, cityscape, cyber punk, neon light, latex bodysuit, swimsuit, extremely delicate and beautiful girl, adorable face, aqua eyes, red eyes, purple eyes, golden eyes, red eyes, pink hair, blue hair, green hair, black hair, silver hair, long hair, absurdly long hair, very long hair, floating hair, underboob, sideboob, cleavage, clothing cutout, glowing eyes"
+            "num": 20,
+            "from": "masterpiece, best quality, cinematic lighting, incredibly absurdres, ultra-detailed illutration, cityscape, cyber punk, neon light, latex bodysuit, swimsuit, extremely delicate and beautiful girl, adorable face, aqua eyes, red eyes, purple eyes, golden eyes, red eyes, pink hair, blue hair, green hair, black hair, silver hair, long hair, absurdly long hair, very long hair, floating hair, underboob, sideboob, cleavage, clothing cutout, glowing eyes, cityscape, neon lights, neon trim, mecha musume, skyscrapers, adorable girl"
         },
         "negative_sample": {
             "sep": ", ",
             "num": 10,
-            "from": "worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, bad face, low quality, worst quality, dark, shaded face"
+            "from": "worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, bad face, low quality, worst quality, dark, shaded face, nsfw"
         }
     },
     {
@@ -87,12 +87,12 @@
         "prompt_sample": {
             "sep": ", ",
             "num": 20,
-            "from": "best quality, highres, absurdres, incredibly absurdres, ultra-detailed illustration, unity cg, blender cg, cinematic lighting, well drawn, swimsuit, school swimsuit, name tag, silver hair, blue hair, red hair, green hair, golden hair, brown hair, black hair, serafuku, sailor collar, thighs, legs, water, ocean, wading, water splash, water drops, legs in water, wading in water, sea, beach, ocean, loli, little girl, petite, extremely delicate and beautiful girl"
+            "from": "ultra-detailed illustration, incredibly absurdres, highres, best quality, well drawn, best quality, highres, absurdres, incredibly absurdres, ultra-detailed illustration, unity cg, blender cg, cinematic lighting, well drawn, swimsuit, school swimsuit, name tag, silver hair, blue hair, red hair, green hair, golden hair, brown hair, black hair, serafuku, sailor collar, thighs, legs, water, ocean, wading, water splash, water drops, legs in water, wading in water, sea, beach, ocean, loli, little girl, petite, extremely delicate and beautiful girl"
         },
         "negative_sample": {
             "sep": ", ",
-            "num": 10,
-            "from": "missing fingers, extra fingers, missing legs, extra legs, extra arms, bad hands, worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, simple background, monochrome, simple background, white background, black background"
+            "num": 20,
+            "from": "sketch, worst quality, lowres, blurry, artifacts, missing fingers, extra fingers, missing legs, extra legs, extra arms, bad hands, worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, simple background, monochrome, simple background, white background, black background"
         }
     },
     {

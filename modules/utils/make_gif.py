@@ -10,7 +10,7 @@ def hashed(obj, length=10):
 def make_gif(images, exec="gifski", fps=8, max_filesize = 5<<20, outfilename = None):
     w, h = images[0].size
     area = w*h
-    area = min(area, filesize/len(images)/0.6)
+    area = min(area, max_filesize/len(images)/0.6)
     tempdir = tempfile.gettempdir()
     files = []
     for im in images:

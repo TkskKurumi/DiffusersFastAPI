@@ -13,12 +13,18 @@ import torch
 from functools import partial
 from typing import Callable
 import os
+from tqdm import tqdm
+from modules.utils.pil_layout import RichText, Column, Row
+from modules.utils.pil_layout.resize import limit as limit_image_size
 
 
 def softmax(vec, axis=1):
     exp = np.exp(vec)
     expsum = np.sum(exp, axis=axis, keepdims=True)
-    return exp/expsum
+    ret = exp/expsum
+    sm = np.abs(np.sum(ret, axis=axis)-1)
+    assert np.all(sm<1e-8)
+    return ret
 
 
 def clip_std(vec, axis=1, clip=0.55, eps=1e-7):
@@ -64,7 +70,7 @@ class Interpolater:
         self.name = name
         self.model_names = model_names
         self.vec = self.rnd_vec()
-
+        self.is_slow = False
     def rnd_vec(self):
         return np.random.normal(0, 1, (self.ch, self.n))
 
@@ -73,9 +79,20 @@ class Interpolater:
 
     def commit_vec(self, vec, normalizer: Callable = lambda x: x):
         vec = normalizer(vec)
+        # orig_vec = normalizer(self.vec)
+        def fdelta(x):
+            if(x>0):
+                return "+%.2f%%"%(x)
+            elif(x==0):
+                return " %.2f%%"%(x)
+            else:
+                return "%.2f%%"%(x)
         with print_time("interpolate model %s" % self.name):
             result_state = {}
-            for idx, key in enumerate(self.keys):
+            iterator = enumerate(self.keys)
+            if(self.is_slow):
+                iterator = tqdm(iterator)
+            for idx, key in iterator:
                 w = vec[idx]
                 # print(key, w)
                 tensor = 0
@@ -125,18 +142,18 @@ def input_yn(prompt, chars="ny"):
             if(ch in chars.lower()):
                 return chars.lower().find(ch)
 
-
+VAE_EXTRA = 2
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-config", type=str,
                         required=True, help="specify model paths in this file")
-    parser.add_argument("--seed", type=int, default=998244353)
+    parser.add_argument("--seed", type=int, default=1024)
     parser.add_argument("--prompt-config", type=str, default="")
-    parser.add_argument("--alpha", type=float, default=0.05)
+    parser.add_argument("--alpha", type=float, default=0.0005)
     parser.add_argument("--beta", type=float, default=0.8)
-    parser.add_argument("--steps", type=int, default=50)
+    parser.add_argument("--steps", type=int, default=20)
     parser.add_argument("--clip-overflow", type=float, default=0)
-    parser.add_argument("--infer-steps", type=int, default=25)
+    parser.add_argument("--infer-steps", type=int, default=32)
     parser.add_argument("--normalizer", type=str,
                         choices=["softmax", "clip_std", "clip_overflow"], default="clip_overflow")
     parser.add_argument("--lr", type=float, default=1)
@@ -151,10 +168,12 @@ def main():
     unets = []
     tes = []
     model_names = []
+    model_init = []
     for idx, i in enumerate(j):
         pth = i["pth"]
         vae = i.get("vae", "")
         model_name = i.get("name", os.path.basename(pth)[:8])
+        model_init.append(i.get("init_bias", 0))
         model = load_model(model_name, pth, vae)
         models.append(model)
         model_names.append(model_name)
@@ -168,11 +187,13 @@ def main():
     }[args.normalizer]
     _model = model_mgr._INFER_MODEL
     interp_vae = Interpolater("vae", _model.vae, vaes, model_names)
+
     interp_unet = Interpolater("unet", _model.unet, unets, model_names)
     interp_te = Interpolater(
         "text_encoder", _model.text_encoder, tes, model_names)
     interps = [interp_vae, interp_unet, interp_te]
-
+    for i in interps:
+        i.vec = i.vec + model_init
     _model = model_mgr._INFER_MODEL
     model = CustomPipeline(_model)
     steps = args.steps
@@ -185,35 +206,44 @@ def main():
     
     
     nmodels = interp_vae.n
+    model_samples = []
     for i in range(nmodels):
         print("generate base sample for %s"%model_names[i])
         for jdx, j in enumerate(interps):
             vec = j.zeros()
             vec[:, i] = 1
             j.commit_vec(vec)
-        generate_sample().save("./sample_%s.png"%model_names[i])
-    step_images = []
+        im = generate_sample()
+        title = "Model=%s"%model_names[i]
+        im = Column([im, RichText([title], font_size=30)], bg=(255,)*4).render()
+        model_samples.append(im)
+        im.save("sample_%s.png"%(model_names[i]))
+    step_selections = []
     for step in range(steps):
         try:
             direction = [i.rnd_vec() for i in interps]
             step_rate = args.alpha**(step/(steps-1))
             for idx, i in enumerate(direction):
+                
                 bymodel_bias = np.random.normal(0, 1, (1, interps[idx].n))
-                r = step_rate**4
+                r = step_rate
+                if(interps[idx].name=="vae"):
+                    r*=VAE_EXTRA
                 vec = i + bymodel_bias*r + momentum[idx]
                 vec /= (2+r*r)**0.5
                 direction[idx] = vec
+                
 
             prompt, neg = get_prompt(args.prompt_config, step)
             delta_norm = []
             for idx, i in enumerate(interps):
                 delta = direction[idx]*step_rate*args.lr
                 newvec = i.vec - delta
-                delta_norm.append((delta**2).sum())
+                delta_norm.append((delta**2).mean())
                 i.commit_vec(i.vec, normalizer)
-            delta_norm = np.array(delta_norm).sum() ** 0.5
-            momentum_norm = np.array([(i**2).sum()
-                                     for i in momentum]).sum()**0.5
+            delta_norm = np.array(delta_norm).mean() ** 0.5
+            momentum_norm = np.array([(i**2).mean()
+                                     for i in momentum]).mean()**0.5
             repro = model.txt2img(
                 prompt, steps=args.infer_steps, width=640, height=768, neg_prompt=neg)
             image0 = repro.result
@@ -232,7 +262,7 @@ def main():
             arr = arr**0.5
             arr = (arr-arr.min())/(arr.max()-arr.min())*255
             image_d = Image.fromarray(arr.astype(np.uint8))
-            image_d.save("./diff.png")
+            Row([image0, image_d, image1]).render().save("./diff.png")
             print("Moving Speed", delta_norm, "momentum", momentum_norm)
             which = input_yn(
                 "./0.png <-> ./1.png / ./diff.png which is better? (0/1)", "01")
@@ -250,11 +280,29 @@ def main():
                 model_contrib = np.mean(norm, axis=0)
                 print("avg. weight of %s:" % i.name, model_contrib)
                 i.commit_vec(i.vec, normalizer)
-            stepim = generate_sample()
-            stepim.save("./sample_merged.png")
-            step_images.append(stepim)
-            if(len(step_images)>=3):
-                print(make_gif(step_images, fps=3, outfilename="rmhf.gif"))
+            
+            selection = []
+            sel0 = forward<0
+            if(sel0):
+                text0, fill0 = "Selected", (0, 255, 0, 255)
+                text1, fill1 = ":(", (255, 0, 0, 255)
+            else:
+                text0, fill0 = ":(", (255, 0, 0, 255)
+                text1, fill1 = "Selected", (0, 255, 0, 255)
+            image0 = Column([image0, RichText([text0], fill=fill0, font_size=48)])
+            image1 = Column([image1, RichText([text1], fill=fill1, font_size=48)])
+            stepim = Column([generate_sample(), RichText(["Step %03d Merged"%step], font_size=30)], bg=(255,)*4).render()
+            step_selections.append([image0, stepim, image1])
+            contents = []
+            for i in step_selections:
+                contents.append(Row(i))
+            im = Column(contents, bg=(255,)*4).render()
+            limit_image_size(im, area=1.5e7).convert("RGB").save("steps.jpg", quality=97)
+            contents = []
+            for i in model_samples:
+                contents.append(Row([i, stepim]))
+            im = Column(contents, bg=(255,)*4).render()
+            limit_image_size(im, area=1.5e7).convert("RGB").save("compare_models.jpg", quality=97)
         except KeyboardInterrupt:
             break
     print("saving result..")
