@@ -2,25 +2,25 @@
     {
         "prompt_sample": {
             "sep": ", ",
-            "num": 10,
-            "from": "masterpiece, best quality, cinematic lighting, pink hair, white hair, 1girl, incredibly absurdres"
-        }, 
+            "num": 20,
+            "from": "masterpiece, best quality, cinematic lighting, pink hair, 1girl, incredibly absurdres, cat ears, blue eyes, red eyes, heterochromia, serafuku, cute, petite, loli, little girl, school girl, medium breasts, navel"
+        },
         "negative_sample": {
             "sep": ", ",
             "num": 10,
-            "from": "worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn"
+            "from": "worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, small breasts, huge breasts"
         }
     },
     {
         "prompt_sample": {
             "sep": ", ",
             "num": 10,
-            "from": "masterpiece, best quality, cinematic lighting, incredibly absurdres, ultra-detailed illutration, cityscape, cyber punk, neon light, latx bodysuit, swimsuit, extremely delicate and beautiful girl"
-        }, 
+            "from": "masterpiece, best quality, cinematic lighting, incredibly absurdres, ultra-detailed illutration, cityscape, cyber punk, neon light, latex bodysuit, swimsuit, extremely delicate and beautiful girl, adorable face, aqua eyes, red eyes, purple eyes, golden eyes, red eyes, pink hair, blue hair, green hair, black hair, silver hair, long hair, absurdly long hair, very long hair, floating hair, underboob, sideboob, cleavage, clothing cutout, glowing eyes"
+        },
         "negative_sample": {
             "sep": ", ",
             "num": 10,
-            "from": "worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn"
+            "from": "worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, bad face, low quality, worst quality, dark, shaded face"
         }
     },
     {
@@ -28,7 +28,7 @@
             "sep": ", ",
             "num": 10,
             "from": "masterpiece, best quality, cinematic lighting, blue hair, aqua hair, 1girl, incredibly absurdres"
-        }, 
+        },
         "negative_sample": {
             "sep": ", ",
             "num": 10,
@@ -40,7 +40,7 @@
             "sep": ", ",
             "num": 10,
             "from": "masterpiece, best quality, cinematic lighting, incredibly absurdres, black hair, red streaked hair, serafuku, frills, bow"
-        }, 
+        },
         "negative_sample": {
             "sep": ", ",
             "num": 10,
@@ -52,7 +52,7 @@
             "sep": ", ",
             "num": 10,
             "from": "intricate detail, ultra-detailed illustration, well drawn, extremely delicate and beautiful, best quality, incredibly absurdres, highres, high quality, white hair, blue hair, green hair, pink hair, red hair, purple hair, black eyes, red eyes, blue eyes, serafuku, sailor collar, frilled dress, layered dress, bridal veil"
-        }, 
+        },
         "negative_sample": {
             "sep": ", ",
             "num": 10,
@@ -64,11 +64,11 @@
             "sep": ", ",
             "num": 10,
             "from": "intricate detail, ultra-detailed illustration, well drawn, extremely delicate and beautiful, best quality, incredibly absurdres, highres, high quality, serafuku, sailor collar, frilled dress, layered dress, bridal veil, grass lands, forest, trees, palm trees, beach, outdoors"
-        }, 
+        },
         "negative_sample": {
             "sep": ", ",
             "num": 10,
-            "from": "missing fingers, extra fingers, missing legs, extra legs, extra arms, bad hands, worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, simple background, monochrome"
+            "from": "missing fingers, extra fingers, missing legs, extra legs, extra arms, bad hands, worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, simple background, monochrome, simple background, white background, black background"
         }
     },
     {
@@ -76,12 +76,59 @@
             "sep": ", ",
             "num": 10,
             "from": "intricate detail, ultra-detailed illustration, well drawn, extremely delicate and beautiful, best quality, incredibly absurdres, highres, high quality, black dress, layered dress, black dress with gold trim, intricate detailed lace trim, cross-laced, criss-cross halter, halterneck, layered dress"
-        }, 
+        },
         "negative_sample": {
             "sep": ", ",
             "num": 10,
-            "from": "missing fingers, extra fingers, missing legs, extra legs, extra arms, bad hands, worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, simple background, monochrome"
+            "from": "missing fingers, extra fingers, missing legs, extra legs, extra arms, bad hands, worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, simple background, monochrome, simple background, white background, black background"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "best quality, highres, absurdres, incredibly absurdres, ultra-detailed illustration, unity cg, blender cg, cinematic lighting, well drawn, swimsuit, school swimsuit, name tag, silver hair, blue hair, red hair, green hair, golden hair, brown hair, black hair, serafuku, sailor collar, thighs, legs, water, ocean, wading, water splash, water drops, legs in water, wading in water, sea, beach, ocean, loli, little girl, petite, extremely delicate and beautiful girl"
+        },
+        "negative_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "missing fingers, extra fingers, missing legs, extra legs, extra arms, bad hands, worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, simple background, monochrome, simple background, white background, black background"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "intricate detail, ultra-detailed illustration, unity cg, blender cg, incredibly absurdres, highres, best quality, high quality, extremely delicate and beautiful, black hair, white hair, red hair, blue hair, green hair, pink hair, purple hair, light blue hair, silver hair, golden hair, pleated skirt, plaid skirt, dress, frilled dress, frills, headdress, maid headdress, maid apron, lace-trim, boots, highheels, cityscape, neon light, city light, starry night, night sky, clouds, blue sky, purple sky, orange sky, sunset, sunrise, sunlight, dappled sunlight, outdoors, indoors, light particles, window shade"
+        },
+        "negative_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "missing fingers, extra fingers, missing legs, extra legs, extra arms, bad hands, worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, simple background, monochrome, simple background, white background, black background"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "best quality, highres, absurdres, incredibly absurdres, ultra-detailed illustration, unity cg, blender cg, cinematic lighting, well drawn, navel, crop top, shirt, off-shoulder shirt, midriff, stomach, groin, underboob, sideboob, black legwear, black stockings"
+        },
+        "negative_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "missing fingers, extra fingers, missing legs, extra legs, extra arms, bad hands, worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, simple background, monochrome, simple background, white background, black background"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "best quality, highres, absurdres, incredibly absurdres, ultra-detailed illustration, unity cg, blender cg, cinematic lighting, well drawn, intricate detail, architecture, buildings, traditional buildings, ancient greece buildings, ancient rome buildings, garden, palace, ruins, pillars, 1girl, sitting, holding bouquet, luxury frilled dress, gold trim, lolita fashion, layered dress, shoes, headdress, bridal veil, golden eyes, blue eyes, aqua eyes, golden hair, silver hair, orange hair, light brown hair, cross-laced, laced-up, lace trimmed dress, elbow gloves"
+        },
+        "negative_sample": {
+            "sep": ", ",
+            "num": 10,
+            "from": "missing fingers, extra fingers, missing legs, extra legs, extra arms, bad hands, worst quality, lowres, blurry, error, bad anatomy, mutation, sketch, bad proportion, bad perspective, poorly drawn, simple background, monochrome, simple background, white background, black background"
         }
     }
-    
 ]

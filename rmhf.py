@@ -1,15 +1,18 @@
 import random
+from PIL import Image
 from modules.diffusion.model_mgr import load_model
 from modules.diffusion.model_mgr import model_mgr
 from modules.diffusion.wrapped_pipeline import CustomPipeline
 from modules.utils.diffuers_conversion import save_ldm
 from modules.utils.candy import print_time
+from modules.utils.make_gif import make_gif
 import argparse
 import json
 import numpy as np
 import torch
 from functools import partial
 from typing import Callable
+import os
 
 
 def softmax(vec, axis=1):
@@ -50,13 +53,16 @@ def clip_overflow(vec, axis=1, of=0.1):
 
 
 class Interpolater:
-    def __init__(self, name, dst_model, *states):
+    def __init__(self, name, dst_model, states, model_names):
         self.dst_model = dst_model
         self.states = states
-        self.keys = states[0].keys()
+        self.keys = list(states[0].keys())
         self.ch = len(self.keys)
         self.n = len(states)
+        print("interpolating %d sets of %s weight, each set has %d weigths" %
+              (self.n, name, self.ch))
         self.name = name
+        self.model_names = model_names
         self.vec = self.rnd_vec()
 
     def rnd_vec(self):
@@ -65,7 +71,7 @@ class Interpolater:
     def zeros(self):
         return np.zeros((self.ch, self.n))
 
-    def commit_vec(self, vec, normalizer: Callable):
+    def commit_vec(self, vec, normalizer: Callable = lambda x: x):
         vec = normalizer(vec)
         with print_time("interpolate model %s" % self.name):
             result_state = {}
@@ -78,11 +84,21 @@ class Interpolater:
                 result_state[key] = tensor
             self.dst_model.load_state_dict(result_state)
 
+            print("%s:" % self.name, end="")
+            for i in range(self.n):
+                contrib = vec[:, i]
+                mean = contrib.mean()
+                print(" %.2f%%" % (mean*100), end="")
+            print()
 
-def get_prompt(prompt_file):
+
+def get_prompt(prompt_file, idx=None):
     with open(prompt_file, "r") as f:
         j = json.load(f)
-    j = random.choice(j)
+    if(idx is not None):
+        j = j[idx % len(j)]
+    else:
+        j = random.choice(j)
 
     def _(k):
         if (k in j):
@@ -116,13 +132,14 @@ def main():
                         required=True, help="specify model paths in this file")
     parser.add_argument("--seed", type=int, default=998244353)
     parser.add_argument("--prompt-config", type=str, default="")
-    parser.add_argument("--alpha", type=float, default=0.001)
-    parser.add_argument("--beta", type=float, default=0.9)
+    parser.add_argument("--alpha", type=float, default=0.05)
+    parser.add_argument("--beta", type=float, default=0.8)
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--clip-overflow", type=float, default=0)
     parser.add_argument("--infer-steps", type=int, default=25)
     parser.add_argument("--normalizer", type=str,
                         choices=["softmax", "clip_std", "clip_overflow"], default="clip_overflow")
+    parser.add_argument("--lr", type=float, default=1)
     args = parser.parse_args()
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -133,11 +150,14 @@ def main():
     vaes = []
     unets = []
     tes = []
+    model_names = []
     for idx, i in enumerate(j):
         pth = i["pth"]
         vae = i.get("vae", "")
-        model = load_model("model_%d" % idx, pth, vae)
+        model_name = i.get("name", os.path.basename(pth)[:8])
+        model = load_model(model_name, pth, vae)
         models.append(model)
+        model_names.append(model_name)
         vaes.append(model.vae.state_dict())
         unets.append(model.unet.state_dict())
         tes.append(model.text_encoder.state_dict())
@@ -147,15 +167,32 @@ def main():
         "clip_overflow": partial(clip_overflow, of=args.clip_overflow)
     }[args.normalizer]
     _model = model_mgr._INFER_MODEL
-    interp_vae = Interpolater("vae", _model.vae, *vaes)
-    interp_unet = Interpolater("unet", _model.unet, *unets)
-    interp_te = Interpolater("text_encoder", _model.text_encoder, *tes)
+    interp_vae = Interpolater("vae", _model.vae, vaes, model_names)
+    interp_unet = Interpolater("unet", _model.unet, unets, model_names)
+    interp_te = Interpolater(
+        "text_encoder", _model.text_encoder, tes, model_names)
     interps = [interp_vae, interp_unet, interp_te]
 
     _model = model_mgr._INFER_MODEL
     model = CustomPipeline(_model)
     steps = args.steps
     momentum = [i.zeros()*0 for i in interps]
+    prompt, neg = get_prompt(args.prompt_config, 0)
+    generate_sample_repro = model.txt2img(
+        prompt, steps=args.infer_steps, width=640, height=768, neg_prompt=neg)
+    generate_sample = lambda *args, **kwargs: generate_sample_repro.reproduce(
+        *args, **kwargs).result
+    
+    
+    nmodels = interp_vae.n
+    for i in range(nmodels):
+        print("generate base sample for %s"%model_names[i])
+        for jdx, j in enumerate(interps):
+            vec = j.zeros()
+            vec[:, i] = 1
+            j.commit_vec(vec)
+        generate_sample().save("./sample_%s.png"%model_names[i])
+    step_images = []
     for step in range(steps):
         try:
             direction = [i.rnd_vec() for i in interps]
@@ -167,44 +204,66 @@ def main():
                 vec /= (2+r*r)**0.5
                 direction[idx] = vec
 
-            prompt, neg = get_prompt(args.prompt_config)
-            mean2 = []
+            prompt, neg = get_prompt(args.prompt_config, step)
+            delta_norm = []
             for idx, i in enumerate(interps):
-                delta = direction[idx]*step_rate
+                delta = direction[idx]*step_rate*args.lr
                 newvec = i.vec - delta
-                l2mean = (delta**2).mean()
-                mean2.append(l2mean)
+                delta_norm.append((delta**2).sum())
                 i.commit_vec(i.vec, normalizer)
-            mean2 = np.array(mean2).mean() ** 0.5
-            print("Moving Speed", mean2)
+            delta_norm = np.array(delta_norm).sum() ** 0.5
+            momentum_norm = np.array([(i**2).sum()
+                                     for i in momentum]).sum()**0.5
             repro = model.txt2img(
                 prompt, steps=args.infer_steps, width=640, height=768, neg_prompt=neg)
             image0 = repro.result
 
             for idx, i in enumerate(interps):
-                newvec = i.vec + direction[idx]*step_rate
+                newvec = i.vec + direction[idx]*step_rate*args.lr
                 i.commit_vec(i.vec + newvec, normalizer)
 
             image1 = repro.reproduce().result
 
             image0.save("./0.png")
             image1.save("./1.png")
+
+            arr = np.array(image0).astype(np.float32) - np.array(image1)
+            arr = (arr**2).sum(axis=2)
+            arr = arr**0.5
+            arr = (arr-arr.min())/(arr.max()-arr.min())*255
+            image_d = Image.fromarray(arr.astype(np.uint8))
+            image_d.save("./diff.png")
+            print("Moving Speed", delta_norm, "momentum", momentum_norm)
             which = input_yn(
-                "./0.png <-> ./1.png which is better? (0/1)", "01")
+                "./0.png <-> ./1.png / ./diff.png which is better? (0/1)", "01")
             forward = which*2-1
             for idx, i in enumerate(interps):
-                newvec = i.vec + forward*direction[idx]*step_rate
-                momentum[idx] = forward*direction[idx]*(1-args.alpha) + momentum[idx]*args.alpha
+                fd = forward*direction[idx]
+                cross = (fd*momentum[idx]).sum() / ((fd**2).sum()
+                                                    ** 0.5) / ((momentum[idx]**2 + 1e-7).sum()**0.5)
+                print("foward direction is %.2f%% same with momentum" %
+                      (cross*100))
+                newvec = i.vec + fd*step_rate*args.lr
+                momentum[idx] = fd * (1-args.beta) + momentum[idx]*args.beta
                 i.vec = newvec
                 norm = normalizer(i.vec)
                 model_contrib = np.mean(norm, axis=0)
                 print("avg. weight of %s:" % i.name, model_contrib)
+                i.commit_vec(i.vec, normalizer)
+            stepim = generate_sample()
+            stepim.save("./sample_merged.png")
+            step_images.append(stepim)
+            if(len(step_images)>=3):
+                print(make_gif(step_images, fps=3, outfilename="rmhf.gif"))
         except KeyboardInterrupt:
             break
     print("saving result..")
     for idx, i in enumerate(interps):
         i.commit_vec(i.vec, normalizer)
     save_ldm("./rmhf.safetensors", _model)
+    
+    generate_sample().save("./sample_merged.png")
+    
 
 
 main()
