@@ -142,7 +142,7 @@ def input_yn(prompt, chars="ny"):
             if(ch in chars.lower()):
                 return chars.lower().find(ch)
 
-VAE_EXTRA = 2
+VAE_EXTRA = 3
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-config", type=str,
@@ -155,8 +155,8 @@ def main():
     parser.add_argument("--clip-overflow", type=float, default=0)
     parser.add_argument("--infer-steps", type=int, default=32)
     parser.add_argument("--normalizer", type=str,
-                        choices=["softmax", "clip_std", "clip_overflow"], default="clip_overflow")
-    parser.add_argument("--lr", type=float, default=1)
+                        choices=["softmax", "clip_std", "clip_overflow"], default="softmax")
+    parser.add_argument("--lr", type=float, default=2)
     args = parser.parse_args()
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -224,10 +224,12 @@ def main():
             direction = [i.rnd_vec() for i in interps]
             step_rate = args.alpha**(step/(steps-1))
             for idx, i in enumerate(direction):
-                
                 bymodel_bias = np.random.normal(0, 1, (1, interps[idx].n))
                 r = step_rate
                 if(interps[idx].name=="vae"):
+                    # VQVAE is quite non-linear.
+                    # In practice I found that when interpolate, images becomes gray, undersaturated.
+                    # Thus, should make sure one model has dominate contribution.
                     r*=VAE_EXTRA
                 vec = i + bymodel_bias*r + momentum[idx]
                 vec /= (2+r*r)**0.5
