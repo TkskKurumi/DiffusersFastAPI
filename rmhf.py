@@ -1,4 +1,7 @@
 import random
+import time
+from termcolor import colored
+from math import sqrt
 from PIL import Image
 from modules.diffusion.model_mgr import load_model
 from modules.diffusion.model_mgr import model_mgr
@@ -70,15 +73,37 @@ class Interpolater:
         self.name = name
         self.model_names = model_names
         self.vec = self.rnd_vec()
+        self._commited_vec = None
         self.is_slow = False
     def rnd_vec(self):
         return np.random.normal(0, 1, (self.ch, self.n))
 
     def zeros(self):
         return np.zeros((self.ch, self.n))
-
+    def dump_statistics(self, analyze_vec, prt=print):
+        level_vec = dict()
+        for kdx, k in enumerate(self.keys):
+            vec = analyze_vec[kdx]
+            splk = k.split(".")
+            for idx in range(len(splk)+1):
+                nm = ".".join(splk[:idx])
+                if(idx != len(splk)):
+                    nm+=".*"
+                level_vec[nm] = level_vec.get(nm, [])
+                level_vec[nm].append(vec)
+        names = sorted(list(level_vec), key=lambda x:len(level_vec[x]), reverse=True)
+        for name in names:
+            vecs = level_vec[name]
+            avg = np.array(vecs).mean(axis=0)
+            prt("    %s: %s (avg of %d weights)"%(name, avg, len(vecs)))
+        
     def commit_vec(self, vec, normalizer: Callable = lambda x: x):
         vec = normalizer(vec)
+        if (self._commited_vec is not None):
+            dry = np.all(self._commited_vec==vec)
+        else:
+            dry = False
+        self._commited_vec = vec
         # orig_vec = normalizer(self.vec)
         def fdelta(x):
             if(x>0):
@@ -87,28 +112,41 @@ class Interpolater:
                 return " %.2f%%"%(x)
             else:
                 return "%.2f%%"%(x)
-        with print_time("interpolate model %s" % self.name):
-            result_state = {}
-            iterator = enumerate(self.keys)
-            if(self.is_slow):
-                iterator = tqdm(iterator)
-            for idx, key in iterator:
-                w = vec[idx]
-                # print(key, w)
-                tensor = 0
-                for jdx, j in enumerate(self.states):
-                    tensor = tensor + j[key]*w[jdx]
-                result_state[key] = tensor
-            self.dst_model.load_state_dict(result_state)
+        def fpercent(x):
+            if(x>0.7):
+                color = "green"
+            elif(x>0.3):
+                color = "yellow"
+            else:
+                color = "red"
+            return colored("%.2f%%"%(100*x), color)
+        if(not dry):
+            with print_time("interpolate model %s" % self.name):
+                result_state = {}
+                iterator = enumerate(self.keys)
+                if(self.is_slow):
+                    iterator = tqdm(list(iterator), desc=self.name)
+                t = time.time()
+                for idx, key in iterator:
+                    w = vec[idx]
+                    # print(key, w)
+                    tensor = 0
+                    for jdx, j in enumerate(self.states):
+                        tensor = tensor + j[key]*w[jdx]
+                    result_state[key] = tensor
+                self.dst_model.load_state_dict(result_state)
+                self.is_slow = (time.time()-t)>0.5
+        print("%s:" % self.name, end="")
+        for i in range(self.n):
+            contrib = vec[:, i]
+            mean = contrib.mean()
+            print(" %.2f%%" % (mean*100), end="")
+        print()
 
-            print("%s:" % self.name, end="")
-            for i in range(self.n):
-                contrib = vec[:, i]
-                mean = contrib.mean()
-                print(" %.2f%%" % (mean*100), end="")
-            print()
-
-
+def load_json(fn):
+    with open(fn, "r") as f:
+        j = json.load(f)
+    return j
 def get_prompt(prompt_file, idx=None):
     with open(prompt_file, "r") as f:
         j = json.load(f)
@@ -141,15 +179,20 @@ def input_yn(prompt, chars="ny"):
             ch = inp[0].lower()
             if(ch in chars.lower()):
                 return chars.lower().find(ch)
-
-VAE_EXTRA = 3
+def add_title(img, text, fill=(0, 0, 0, 255)):
+    w, h = img.size
+    font_size = int(sqrt(w*h)/10)
+    RT = RichText([text], font_size=font_size, width=int(w*0.9), fill=fill)
+    COL = Column([img, RT], bg=(255,)*4)
+    return COL.render()
+VAE_EXTRA = 4
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-config", type=str,
                         required=True, help="specify model paths in this file")
     parser.add_argument("--seed", type=int, default=1024)
     parser.add_argument("--prompt-config", type=str, default="")
-    parser.add_argument("--alpha", type=float, default=0.0005)
+    parser.add_argument("--alpha", type=float, default=0.001)
     parser.add_argument("--beta", type=float, default=0.8)
     parser.add_argument("--steps", type=int, default=20)
     parser.add_argument("--clip-overflow", type=float, default=0)
@@ -157,6 +200,7 @@ def main():
     parser.add_argument("--normalizer", type=str,
                         choices=["softmax", "clip_std", "clip_overflow"], default="softmax")
     parser.add_argument("--lr", type=float, default=2)
+    parser.add_argument("--lowram", action="store_true", help="Loading models from disk consumes much runtime; rmhf stores model weights in RAM, but each may cost about 7GB RAM; enable this to store them in fp16 format")
     args = parser.parse_args()
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -170,11 +214,15 @@ def main():
     model_names = []
     model_init = []
     for idx, i in enumerate(j):
+        if(not i.get("enabled", True)):
+            continue
         pth = i["pth"]
         vae = i.get("vae", "")
         model_name = i.get("name", os.path.basename(pth)[:8])
         model_init.append(i.get("init_bias", 0))
         model = load_model(model_name, pth, vae)
+        if(args.lowram):
+            model.to(torch.float16)
         models.append(model)
         model_names.append(model_name)
         vaes.append(model.vae.state_dict())
@@ -215,7 +263,8 @@ def main():
             j.commit_vec(vec)
         im = generate_sample()
         title = "Model=%s"%model_names[i]
-        im = Column([im, RichText([title], font_size=30)], bg=(255,)*4).render()
+        im = add_title(im, title)
+        # im = Column([im, RichText([title], font_size=30)], bg=(255,)*4).render()
         model_samples.append(im)
         im.save("sample_%s.png"%(model_names[i]))
     step_selections = []
@@ -230,7 +279,7 @@ def main():
                     # VQVAE is quite non-linear.
                     # In practice I found that when interpolate, images becomes gray, undersaturated.
                     # Thus, should make sure one model has dominate contribution.
-                    r*=VAE_EXTRA
+                    r*=VAE_EXTRA*sqrt(nmodels)
                 vec = i + bymodel_bias*r + momentum[idx]
                 vec /= (2+r*r)**0.5
                 direction[idx] = vec
@@ -291,9 +340,12 @@ def main():
             else:
                 text0, fill0 = ":(", (255, 0, 0, 255)
                 text1, fill1 = "Selected", (0, 255, 0, 255)
-            image0 = Column([image0, RichText([text0], fill=fill0, font_size=48)])
-            image1 = Column([image1, RichText([text1], fill=fill1, font_size=48)])
-            stepim = Column([generate_sample(), RichText(["Step %03d Merged"%step], font_size=30)], bg=(255,)*4).render()
+            image0 = add_title(image0, text0, fill=fill0)
+            # image0 = Column([image0, RichText([text0], fill=fill0, font_size=48)])
+            # image1 = Column([image1, RichText([text1], fill=fill1, font_size=48)])
+            image1 = add_title(image1, text1, fill=fill1)
+            stepim = add_title(generate_sample(), "Step %03d merged"%step)
+            # stepim = Column([generate_sample(), RichText(["Step %03d Merged"%step], font_size=30)], bg=(255,)*4).render()
             step_selections.append([image0, stepim, image1])
             contents = []
             for i in step_selections:
@@ -311,9 +363,45 @@ def main():
     for idx, i in enumerate(interps):
         i.commit_vec(i.vec, normalizer)
     save_ldm("./rmhf.safetensors", _model)
-    
+    print("model saved. generating detailed comparison between models")
     generate_sample().save("./sample_merged.png")
     
+    with open("./rmhf.log", "w") as f:
+        prt = partial(print, file=f)
+        for interp in interps:
+            prt(interp.name+":")
+            prt("    models: %s"%(model_names))
+            norm = normalizer(interp.vec)
+            interp.dump_statistics(norm, prt)
+            # for idx, k in enumerate(interp.keys):
+            #     prt("    %s: %s"%(k, norm[idx, :]))
+    # rows = [[]]
+    rows = []
+    nprompts = len(load_json(args.prompt_config))
+    repros = []
+    for jdx in range(nprompts):
+        p, n = get_prompt(args.prompt_config, jdx)
+        repro = model.txt2img(p, steps=args.infer_steps, width=640, height=768, neg_prompt=n)
+        # rows[0].append(add_title(repro.result, "meregd"))
+        repros.append(repro)
+    # rows[0] = Row(rows[0])
+    for idx in range(nmodels):
+        for interp in interps:
+            vec = interp.zeros()
+            vec[:, idx] = 1
+            interp.commit_vec(vec)
+        row = []
+        for jdx in range(nprompts):
+            repro = repros[jdx]
+            im = repro.reproduce().result
+            im = add_title(im, "model=%s"%model_names[idx])
+            row.append(im)
+            row.append(add_title(repro.result, "merged model"))
+        rows.append(Row(row))
+    im = Column(rows).render()
+    im = limit_image_size(im, area=1e8).convert("RGB")
+    im.save("./compare_models.jpg")
 
 
+    
 main()

@@ -28,7 +28,7 @@ def search_font(size):
     print("default font")
     return ImageFont.load_default()
 class RichText(BaseWidget):
-    def __init__(self, contents, fill=None, bg=None, width=None, font=search_font, font_size=None, padding=None, margin=None, align_x=None, align_y=None, limit_height=None, limit_width=None):
+    def __init__(self, contents, fill=None, bg=None, width=None, font=search_font, font_size=None, padding=None, margin=None, align_x=None, align_y=None, limit_height=None, limit_width=None, preserve_word=None):
         self.contents = contents
         self.bg = bg
         self.fill = fill
@@ -41,6 +41,7 @@ class RichText(BaseWidget):
         self.font = font
         self.limit_height = limit_height
         self.limit_width = limit_width
+        self.preserve_word = preserve_word
 
     def render(self, **kwargs):
         def get(key, *args, **kwa):
@@ -61,6 +62,7 @@ class RichText(BaseWidget):
         padding = get("padding", 0)
         limit_height = get("limit_height", font_size*5)
         limit_width = get("limit_width", canvas_width-padding*2)
+        preserve_word = get("preserve_word", False)
         # prepare font
         if(isinstance(font, str)):
             font = ImageFont.truetype(font, size=font_size)
@@ -74,7 +76,10 @@ class RichText(BaseWidget):
                 for jdx, j in enumerate(re.split("[\n\r]", i)):
                     if(jdx):
                         _contents.append(LF)
-                    _contents.append(j)
+                    if(preserve_word):
+                        _contents.append(j)
+                    else:
+                        _contents.extend(j)
             else:
                 i = limit_size(i, width=limit_width, height=limit_height)
                 _contents.append(i)
@@ -98,7 +103,11 @@ class RichText(BaseWidget):
                         _line.append(st)
                     _line.append(i)
                 elif(isinstance(i, str)):
-                    st += i
+                    if(preserve_word):
+                        if(st):st+=" "
+                        st += i
+                    else:
+                        st += i
                 else:
                     raise TypeError(type(i))
             if (st):
@@ -196,5 +205,8 @@ if (__name__ == "__main__"):
     for i in glob("./*.png"):
         contents.append(i+"\n")
         contents.append(Image.open(i))
+    contents.append("A quick brown fox jumps over a lazy dog.")
     RT = RichText(contents, bg=(255, 255, 255, 255), align_x=0.5)
     RT.render().save("temp.png")
+    RT = RichText("A quick brown fox jumps over a lazy dog.".split(" "), width=300, font_size=48, preserve_word=True)
+    RT.render().save("temp1.png")
