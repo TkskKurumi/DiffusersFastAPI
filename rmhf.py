@@ -1,5 +1,5 @@
 import random
-import time
+import time, shutil
 from termcolor import colored
 from math import sqrt
 from PIL import Image
@@ -147,29 +147,47 @@ def load_json(fn):
     with open(fn, "r") as f:
         j = json.load(f)
     return j
-def get_prompt(prompt_file, idx=None):
-    with open(prompt_file, "r") as f:
-        j = json.load(f)
-    if(idx is not None):
-        j = j[idx % len(j)]
-    else:
-        j = random.choice(j)
-
-    def _(k):
-        if (k in j):
-            return j[k]
+def get_prompt_v2(j):
+    positives = []
+    negatives = []
+    if(isinstance(j, dict)):
+        typ = j["type"]
+        frm = j["from"]
+        if(isinstance(frm, str)):
+            frm = [_.strip() for _ in frm.split(",")]
+        if(typ=="choice"):
+            result = [random.choice(frm)]
+        elif(typ=="sample"):
+            cnt = j["count"]
+            result = random.sample(frm, min(len(frm), cnt))
         else:
-            ps = j[k+"_sample"]
-            n = ps["num"]
-            sep = ps["sep"]
-            sample_from = ps["from"].split(sep)
-            if(len(sample_from) > n):
-                sample_from = random.sample(sample_from, n)
-            return sep.join(sample_from)
+            assert typ=="sample_freq", typ
+            freq = j["freq"]
+            result = []
+            for _ in frm:
+                if(random.random()<freq):
+                    result.append(_)
+            random.shuffle(result)
+        result = [get_prompt_v2(_) for _ in result]
+        if(not j.get("positive", True)):
+            result = [(n, p) for p, n in result]
+        for p, n in result:
+            if(p):
+                positives.append(p)
+            if(n):
+                negatives.append(n)
+    elif(isinstance(j, str)):
+        positives = [j]
+    else:
+        assert isinstance(j, list)
+        for _ in j:
+            pos, neg = get_prompt_v2(_)
+            if(pos):
+                positives.append(pos)
+            if(neg):
+                negatives.append(neg)
+    return ", ".join(positives), ", ".join(negatives)
 
-    prompt = _("prompt")
-    neg = _("negative")
-    return prompt, neg
 
 
 def input_yn(prompt, chars="ny"):
@@ -202,6 +220,11 @@ def main():
     parser.add_argument("--lr", type=float, default=2)
     parser.add_argument("--lowram", action="store_true", help="Loading models from disk consumes much runtime; rmhf stores model weights in RAM, but each may cost about 7GB RAM; enable this to store them in fp16 format")
     args = parser.parse_args()
+    with open(args.prompt_config) as f:
+        prompt_dict = json.load(f)
+    prompt, neg = get_prompt_v2(prompt_dict)
+    print(prompt)
+    print(neg)
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -246,7 +269,7 @@ def main():
     model = CustomPipeline(_model)
     steps = args.steps
     momentum = [i.zeros()*0 for i in interps]
-    prompt, neg = get_prompt(args.prompt_config, 0)
+    
     generate_sample_repro = model.txt2img(
         prompt, steps=args.infer_steps, width=640, height=768, neg_prompt=neg)
     generate_sample = lambda *args, **kwargs: generate_sample_repro.reproduce(
@@ -285,7 +308,7 @@ def main():
                 direction[idx] = vec
                 
 
-            prompt, neg = get_prompt(args.prompt_config, step)
+            prompt, neg = get_prompt_v2(prompt_dict)
             delta_norm = []
             for idx, i in enumerate(interps):
                 delta = direction[idx]*step_rate*args.lr
@@ -377,12 +400,19 @@ def main():
             #     prt("    %s: %s"%(k, norm[idx, :]))
     # rows = [[]]
     rows = []
-    nprompts = len(load_json(args.prompt_config))
+    nprompts = nmodels
     repros = []
+    if(os.path.exists("./rmhf_samples")):
+        shutil.rmtree("./rmhf_samples")
+    os.makedirs("./rmhf_samples")
     for jdx in range(nprompts):
-        p, n = get_prompt(args.prompt_config, jdx)
+        p, n = get_prompt_v2(prompt_dict)
         repro = model.txt2img(p, steps=args.infer_steps, width=640, height=768, neg_prompt=n)
-        # rows[0].append(add_title(repro.result, "meregd"))
+        pth = os.path.join("./rmhf_samples", "%03d.jpg"%jdx)
+        repro.result.save(pth)
+        with open(pth+".caption", "w") as f:
+            print("Positive:", p, file = f)
+            print("Negative:", n, file = f)
         repros.append(repro)
     # rows[0] = Row(rows[0])
     for idx in range(nmodels):
