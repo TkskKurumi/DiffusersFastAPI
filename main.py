@@ -433,7 +433,7 @@ class TXT2IMGTicket(Ticket):
 
 class InpaintTicket(Ticket):
     tickets = {}
-    STEP = 25
+    STEP = 45
     LOCK = DIFFUSION_INFER_LOCK
     TIMER_KEY = "diffusion_infer_resolution_steps"
     def __init__(self, token=None, strength=0.75):
@@ -627,6 +627,7 @@ def get_status():
     data = {}
     data["models"] = list(models)
     data["loras"] = list(diffusion_pipe.loras)
+    data["lora_info"] = diffusion_pipe.lora_info
 
     ret = {}
     ret["status"] = 0

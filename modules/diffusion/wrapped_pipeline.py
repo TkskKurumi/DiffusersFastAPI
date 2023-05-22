@@ -6,7 +6,7 @@ from ..utils.load_tensor import load as load_tensor
 from diffusers import StableDiffusionPipeline
 from functools import partial
 import numpy as np
-import torch
+import torch, json
 from torch import nn
 from os import path
 from glob import glob
@@ -36,7 +36,7 @@ def preprocess_image(img, resolution=None):
     return img.resize(size, Image.Resampling.LANCZOS)
 
 def image_as_tensor(image):
-    image = np.array(image).astype(np.float32) / 255.0
+    image = np.array(image.convert("RGB")).astype(np.float32) / 255.0
     image = image[None].transpose(0, 3, 1, 2) # channel, y, x
     image = torch.from_numpy(image)
     return 2.0 * image - 1.0 # to -1 ~ 1
@@ -162,6 +162,7 @@ class CustomPipeline:
         self.ti_alias["remote_random"] = self.random_prompt
         self.ti_loaded = {}
         self.loras = {}
+        self.lora_info = {}
         self.ti_ph_assign = NameAssign()
         self.orig_embd_weights = self.text_encoder.text_model.embeddings.token_embedding.weight.numpy(force=True)
         self.auto_load_ti()
@@ -190,9 +191,30 @@ class CustomPipeline:
             pt = load_tensor(i)
             self.loras[name] = pt
             exists[name] = True
+        files = list()
+        files.extend(glob(path.join(pth, "*", "*.pt")))
+        files.extend(glob(path.join(pth, "*", "*.safetensors")))
+        for i in files:
+            dn = path.dirname(i)
+            name = path.basename(dn)
+            if(name in self.loras):
+                exists[name] = True
+                continue
+            meta = path.join(dn, "info.json")
+            pt = load_tensor(i)
+            self.loras[name] = pt
+            if(path.exists(meta)):
+                with open(meta) as f:
+                    j = json.load(f)
+                    self.lora_info[name] = j
+            exists[name] = True
+
         for k in list(self.loras):
             if(k not in exists):
                 self.loras.pop(k)
+        for k in list(self.lora_info):
+            if(k not in exists):
+                self.lora_info.pop(k, None)
     def wrap_lora(self, *args):
         self.auto_load_lora()
         state_dicts = []

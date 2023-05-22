@@ -51,16 +51,18 @@ class WrapLoRAModule(nn.Module):
         return ret
 
     def _enter(self):
+        self.orig_forward = self.orig_module.forward
         self.orig_module.forward = self.forward
+
 
     def _exit(self):
         self.orig_module.forward = self.orig_forward
 
-    def __enter__(self):
-        self.orig_module.forward = self.forward
+    # def __enter__(self):
+    #     self.orig_module.forward = self.forward
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.orig_module.forward = self.orig_forward
+    # def __exit__(self, exc_type, exc_val, exc_tb):
+    #     self.orig_module.forward = self.orig_forward
 
 
 LORA_UNET_PREFIX = "lora_unet"
@@ -120,7 +122,7 @@ class WrapLoRA:
             i._enter()
 
     def __exit__(self, _, __, ___):
-        for i in self.lora_modules:
+        for i in self.lora_modules[::-1]:
             i._exit()
 
 
