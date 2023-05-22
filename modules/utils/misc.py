@@ -10,7 +10,7 @@ def pil2jpegbytes(pil: Image.Image):
     bio.seek(0)
     return bio.read()
 # DEFAULT_RESOLUTION = 512*512*2
-DEFAULT_RESOLUTION = 720*1280
+DEFAULT_RESOLUTION = 720*1280*0.6
 def normalize_resolution(w, h, resolution=DEFAULT_RESOLUTION, mo=64):
     if(resolution is not None):
         rate = (resolution/w/h)**0.5
@@ -31,6 +31,7 @@ def default_neg_prompt():
     ret = "lowres, bad anatomy, bad hands, error, missing fingers, extra digit, extra legs, extra arms, missing arms, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, blurry, bad feet, bad leg, bad hands, "
     ret += ", gross proportions, fewer digits, extra limbs, fused fingers, long neck, poorly drawn hands, poorly drawn face, bad proportions"
     ret = ret.split(", ")
+    random.seed(0)
     ret = ", ".join(random.sample(ret, 8))
     return ret
 def _list_update_None(ls, *args):
