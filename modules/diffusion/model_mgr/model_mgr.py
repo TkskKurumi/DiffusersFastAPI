@@ -102,7 +102,7 @@ def get_model(unets=None, vaes=None):
         global MASTER_MODEL, LOADED_UNETS, LOADED_VAES
         if(MASTER_MODEL is None):
             if(unets is None):
-                unets = [(1, i) for i in models]
+                unets = [(1, i) for i in list(models)[:1]]
             if(vaes is None):
                 vaes = [(1, i) for i in models]
             if((not unets)or(not vaes)):
