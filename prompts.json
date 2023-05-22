@@ -1,0 +1,74 @@
+[
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 22,
+            "from": "ultra-detailed illustration, extremely detailed, beautifully drawn, well drawn, masterpiece, best quality, cinematic lighting, pink hair, 1girl, incredibly absurdres, cat ears, blue eyes, red eyes, heterochromia, serafuku, cute, petite, loli, little girl, school girl, medium breasts, navel"
+        },
+        "negative_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "pussy, nipples, nsfw, naked, topless, bottomless, lowres, blurry, low quality, worst quality, bad quality, bad anatomy, bad proportion, bad perspective, poorly drawn, sketch"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "ultra-detailed illustration, extremely detailed, beautifully drawn, well drawn, masterpiece, best quality, cinematic lighting, pink hair, 1girl, incredibly absurdres, headgear, mecha musume, mechinery, swimsuit, latex bodysuit, leotard, groin, navel, midriff, stomach, sideboob, underboob, cleavage, off-shoulder, groin, groin tendon, thigh gap, bare hips, hip vent, cityscape, skyscraper, buildings, architecture, street, cyber punk"
+        },
+        "negative_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "pussy, nipples, nsfw, naked, topless, bottomless, lowres, blurry, low quality, worst quality, bad quality, bad anatomy, bad proportion, bad perspective, poorly drawn, sketch"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "ultra-detailed illustration, extremely detailed, beautifully drawn, well drawn, masterpiece, best quality, cinematic lighting, swimsuit, leotard, school swimsuit, competition swimsuit, blue hair, green hair, aqua hair, water, ocean, water drops, bubbles, ocean, wading, legs in water"
+        },
+        "negative_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "pussy, nipples, nsfw, naked, topless, bottomless, lowres, blurry, low quality, worst quality, bad quality, bad anatomy, bad proportion, bad perspective, poorly drawn, sketch, lying"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "ultra-detailed illustration, extremely detailed, beautifully drawn, well drawn, masterpiece, best quality, cinematic lighting, bridal veil, veil, layered dress, frilled dress, intricate detail, black dress with gold trim, gold frills, cross-laced, lace-up, criss-cross halter, halterneck, extremely delicate lace trim"
+        },
+        "negative_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "pussy, nipples, nsfw, naked, topless, bottomless, lowres, blurry, low quality, worst quality, bad quality, bad anatomy, bad proportion, bad perspective, poorly drawn, sketch, lying"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "underwater, waterdrops, bubbles, swimsuit, leotard, bodysuit, goggles on head, diving suit, under water, light particles, dapped sunlight, fish, starfish, octopus, extremely delicate and beautiful, adorable girl, cute girl, floating hair, absurdly long hair, very long hair, glowing eyes, incredibly absurdres, highres, masterpiece, ultra-detailed wallpaper, unity cg, blender cg"
+        },
+        "negative_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "pussy, nipples, nsfw, naked, topless, bottomless, lowres, blurry, low quality, worst quality, bad quality, bad anatomy, bad proportion, bad perspective, poorly drawn, sketch, lying"
+        }
+    },
+    {
+        "prompt_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "window shade, light particles, rays of light, glass reflection, indoors, messy room, desks, bed, pillow, bed sheet, flower pot, mirror reflection, extremely delicate and beautiful lady, well drawn, incredibly absurdres, highres, ultra-detailed illustration, unity cg, blender cg, black hair, red eyes"
+        },
+        "negative_sample": {
+            "sep": ", ",
+            "num": 20,
+            "from": "pussy, nipples, nsfw, naked, topless, bottomless, lowres, blurry, low quality, worst quality, bad quality, bad anatomy, bad proportion, bad perspective, poorly drawn, sketch, lying"
+        }
+    }
+]

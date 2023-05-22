@@ -1,0 +1,19 @@
+[
+    {
+        "name": "MeinaMixV8",
+        "pth": "/root/autodl-tmp/meinamix_meinaV8.safetensors"
+    },
+    {
+        "name" : "Counterfeit V2.5",
+        "pth": "/root/autodl-tmp/Counterfeit-V2.5_fp16.safetensors"
+    },
+    {
+        "name": "Grapefruit",
+        "pth": "/root/autodl-tmp/grapefruitHentaiModel_grapefruitv41.safetensors"
+    },
+    {
+        "name": "PastelMix",
+        "pth": "/root/autodl-tmp/pastelMixStylizedAnime_pastelMixPrunedFP16.safetensors",
+        "vae": "/root/autodl-tmp/pastel-waifu-diffusion.vae.pt"
+    }
+]

@@ -52,7 +52,7 @@ def _load_model(model_id):
             model_id, 
             prediction_type="epsilon",
             scheduler_type="ddim",
-            original_config_file="../Models/LdmModels/v1-inference.yaml"
+            original_config_file="./v1-inference.yaml"
         )
         model.scheduler = sched
     elif(model_id.endswith(".safetensors")):
@@ -61,7 +61,7 @@ def _load_model(model_id):
             prediction_type="epsilon",
             scheduler_type="ddim",
             from_safetensors=True,
-            original_config_file="../Models/LdmModels/v1-inference.yaml"
+            original_config_file="./v1-inference.yaml"
         )
         model.scheduler = sched
     else:
@@ -136,12 +136,12 @@ def get_model(unets=None, vaes=None):
             debug_vram("after interp")
         p = MASTER_MODEL.sd_pipeline
         cnt = 0
-        for model in [p.text_encoder, p.safety_checker]:
-            if(model is not None):
-                if(str(model.device)=="cuda:0"):
-                    cnt += 1
-                    cpu_offload(model, "cuda:0")
-        print("offload %d models to cpu"%cnt)
+        # for model in [p.text_encoder, p.safety_checker]:
+        #     if(model is not None):
+        #         if(str(model.device)=="cuda:0"):
+        #             cnt += 1
+        #             cpu_offload(model, "cuda:0")
+        # print("offload %d models to cpu"%cnt)
         print(LOADED_UNETS, LOADED_VAES)
         return MASTER_MODEL
 class PipeDummy:

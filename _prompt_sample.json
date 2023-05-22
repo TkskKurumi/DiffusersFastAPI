@@ -1,0 +1,78 @@
+[
+    {
+        "type": "choice",
+        "from": [
+            "red hair", "orange hair", "yellow hair", "green hair", "aqua hair", "blue hair", "purple hair",
+            "silver hair", "golden hair", "black hair", "white hair",
+            "black hair, red streaked hair",
+            "pink hair, blue streaked hair"
+        ]
+    },
+    {
+        "type": "choice",
+        "from": [
+            "red eyes, blue eyes, heterochromia, pink hair, cat ears",
+            "red eyes", "blue eyes", "black eyes", "water eyes"
+        ]
+    },
+    {
+        "type": "choice",
+        "from": [
+            "outdoors, street, road, vehicle, dappled sunlight",
+            "night city, cityscape, neon light, skyscraper",
+            "beach, water, ocean, blue sky, white clouds",
+            "school classroom, sunset, desks, dappeled sunlight, light particles, window shade",
+            "indoors, messy room, bedroom, bed, pillow, desk, books, portrait, upper body, dappeled sunlight, light particles, window shade"
+        ]
+    },
+    {
+        "type": "choice",
+        "from": [
+            [
+                "intricate detail, criss-cross halter, halterneck, extremely delicate lace trim, lace-trimmed dress, lace trim, layered dress, black dress with gold trim, gold frills, frilled dress, layered dress, intricate detail",
+                {
+                    "type": "choice",
+                    "positive": false,
+                    "from": [
+                        "simple background, black background"
+                    ]
+                }
+            ],
+            "sailor collar, serafuku, school uniform, school girl",
+            "pajamas, messy clothes, off-shoulder clothes",
+            "bodysuit, leotard, latex bodysuit, cleavage cutout, underboob cutout",
+            "white shirt, pencil skirt, office lady, indoors",
+            "frilled swimsuit, bikini, side-tie knots, navel, cleavage, halterneck",
+            "side-tie knots, china dress, chinadress, side slit, thighs, traditional chinese architecture",
+            [
+                "mecha musume, prosthetic arms, mechanical arms, prosthetic legs, artificial legs, mechanical legs, bodysuit, bare shoulders, thighs, prosthesis, headgear",
+                {
+                    "type": "choice",
+                    "from": [
+                        "black leotard, black bodysuit, neon trim",
+                        "white leotard, white bodysuit, blue stripes, two-tone bodysuit",
+                        "red leotard, unitard, pilot suit",
+                        "bodystockings, translucent clothes, see-through bodysuit"
+                    ]
+                }
+            ]
+        ]
+    },
+    {
+        "type": "sample_freq",
+        "freq": 0.2,
+        "from": "underboob, sideboob, cleavage"
+    },
+    {
+        "type": "sample",
+        "count": 15,
+        "positive": false,
+        "from": "bad anatomy, bad perspective, bad proportion, poorly drawn, poorly proportioned, sketch, messy drawing, lowres, blurry, glitch, artifacts, corruption, error, low quality, worst quality, mutation"
+    },
+    {
+        "type": "sample",
+        "count": 15,
+        "positive": true,
+        "from": "best quality, high quality, absurdres, incredibly absurdres, highres, unity cg, blender cg, ultra-detailed illustration, intricate detail, wallpaper, masterpiece, beautifully drawn"
+    }
+]
