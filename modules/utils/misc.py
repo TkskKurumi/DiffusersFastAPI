@@ -4,13 +4,16 @@ import numpy as np
 from io import BytesIO
 from dataclasses import dataclass
 from PIL import ImageColor
+import os
+
+DEVICE = os.environ.get("DIFFUSION_DEVICE", "cuda")
 def pil2jpegbytes(pil: Image.Image):
     bio = BytesIO()
     pil.save(bio, "PNG")
     bio.seek(0)
     return bio.read()
-# DEFAULT_RESOLUTION = 512*512*2
-DEFAULT_RESOLUTION = 720*1280*0.6
+# DEFAULT_RESOLUTION = 512*512*1.5
+DEFAULT_RESOLUTION = 720*1280
 def normalize_resolution(w, h, resolution=DEFAULT_RESOLUTION, mo=64):
     if(resolution is not None):
         rate = (resolution/w/h)**0.5

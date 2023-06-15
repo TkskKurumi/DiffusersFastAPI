@@ -2,7 +2,7 @@ from torch import nn
 import torch
 from typing import List
 from ...utils.load_tensor import load as load_tensor
-
+from ...utils.misc import DEVICE as DEFAULT_DEVICE
 
 class LoRALayer(nn.Module):
     def __init__(self, orig_module, channels, alpha=1):
@@ -74,7 +74,7 @@ class Empty:
         return
 
 class WrapLoRA:
-    def __init__(self, orig_unet: nn.Module, lora_sd, lora_scales, torch_dtype=torch.float16, device="cuda", prefix=LORA_UNET_PREFIX):
+    def __init__(self, orig_unet: nn.Module, lora_sd, lora_scales, torch_dtype=torch.float16, device=DEFAULT_DEVICE, prefix=LORA_UNET_PREFIX):
         self.orig_unet = orig_unet
         self.lora_modules = []
         for name, module in orig_unet.named_modules():

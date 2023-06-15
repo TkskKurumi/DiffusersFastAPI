@@ -430,7 +430,88 @@ class TXT2IMGTicket(Ticket):
             
             return self._result
         return self._result
+class MultiDiffisionTicket(Ticket):
+    tickets = {}
+    STEP = 45
+    LOCK = DIFFUSION_INFER_LOCK
+    TIMER_KEY = "diffusion_infer_resolution_steps"
+    def __init__(self, token=None):
+        super().__init__("multi_diffusion", token)
+        MultiDiffisionTicket.tickets[self.id] = self
+        self.params = {}
+    @property
+    def accepted_params(self):
+        return ["multi_prompts", "prompt", "guidance", "aspect"]
+    def param(self, **kwargs):
+        for key in self.accepted_params:
+            if (key in kwargs):
+                self.params[key] = kwargs[key]
+        if ("neg_prompt" not in self.params):
+            self.params["neg_prompt"] = default_neg_prompt()
+    def __str__(self):
+        ret = []
+        for key in self.accepted_params:
+            if(key.startswith("mask")):continue
+            if(key in self.params):
+                
+                v = str(self.params[key])
+                if(len(v)>50):
+                    v = v[:50]+"..."
+                ret.append("%s=%s"%(key, v))
+        return "<multi-diffusion %s>"%(", ".join(ret))
+    
+    def auth(self):
+        return True
+    def eta_this(self):
+        return get_eta(MultiDiffisionTicket.TIMER_KEY, self.get_n(), True)
+    def eta(self):
+        return get_eta(MultiDiffisionTicket.TIMER_KEY, self.get_n())
+    def form_pipe_kwargs(self):
+        pro = self.params.get("prompt", "")
+        neg_pro = self.params["neg_prompt"]
+        prompts =[]
+        masks = []
+        for idx, i in enumerate(self.params["multi_prompts"]):
+            if(pro):
+                prompts.append(i+", "+pro)
+            else:
+                prompts.append(i)
+            mask = self.params["mask_%d"%(idx)]
+            w, h = normalize_resolution(*mask.size)
+            masks.append(mask)
+        cfg = self.params.get("guidance", 12)
+        steps = 45
 
+        make_ret = lambda *args, **kwargs:(args, kwargs)
+        return make_ret(masks, prompts, steps=steps, cfg=cfg, width=w, height=h, neg_prompt=neg_pro)
+    
+    def get_n(self):
+        args, kwargs = self.form_pipe_kwargs()
+        return diffusion_pipe.get_multi_diffusion_multiplier(*args, **kwargs)
+
+    def run(self):
+        t = Timer(self.TIMER_KEY, self.get_n())
+        try:
+            with t:
+                self.status = TicketStatus.RUNNING
+                args, kwargs = self.form_pipe_kwargs()
+                with locked(self.LOCK):
+                    rep = diffusion_pipe.multi_diffusion(*args, **kwargs)
+                self._result = {
+                    "status": 0,
+                    "message": "ok",
+                    "data": {
+                        "image": add_img(rep.result),
+                        "type": "image"
+                    }
+                }
+                return self._result
+        except Exception as e:
+            traceback.print_exc()
+            self._result = {"status": -500, "message": "failed",
+                            "reason": str(e)}
+            
+            return self._result
 class InpaintTicket(Ticket):
     tickets = {}
     STEP = 45
@@ -459,7 +540,7 @@ class InpaintTicket(Ticket):
                 if(len(v)>50):
                     v = v[:50]+"..."
                 ret.append("%s=%s"%(key, v))
-        return "<img2img %s>"%(", ".join(ret))
+        return "<inpaint %s>"%(", ".join(ret))
     def auth(self):
         return True
     def eta_this(self):
@@ -516,6 +597,7 @@ class TicketParam(BaseModel):
     aspect: float | NoneType = None
     alpha: float | NoneType = None
     prompt1: str | NoneType = None
+    multi_prompts: NoneType | List[str] = None
     nframes: int | NoneType | List[float] = 8
     use_noise: str | NoneType = None
     use_noise_alpha: float = 1
@@ -525,6 +607,7 @@ class TicketParam(BaseModel):
     unets: str | NoneType = None
     vaes: str | NoneType = None
     loras: str | NoneType = None
+    
 def serialize_response(resp):
     if(isinstance(resp, list)):
         return [serialize_response(i) for i in resp]
@@ -570,7 +653,7 @@ def post_upload(ticket_id: str, fn: str="orig_image", data: UploadFile = File())
         return JSONResponse(ret, status_code=404)
 @app.get("/ticket/{ticket_id}/del")
 def del_ticket(ticket_id):
-    for cls in [Ticket, TXT2IMGTicket, IMG2IMGTicket, InpaintTicket, TXT2IMGPromptInterp]:
+    for cls in [Ticket, TXT2IMGTicket, IMG2IMGTicket, InpaintTicket, TXT2IMGPromptInterp, MultiDiffisionTicket]:
         cls.tickets.pop(ticket_id, None)
     return JSONResponse({"status":0}, status_code=200)
 @app.get("/ticket/{ticket_id}/result")
@@ -653,6 +736,8 @@ def post_ticket_create(purpose: str):
         t = TXT2IMGPromptInterp()
     elif(purpose == "inpaint"):
         t = InpaintTicket()
+    elif(purpose=="multi_diffusion"):
+        t = MultiDiffisionTicket()
     else:
         ret["status"] = -1
         ret["message"] = "unknown purpose"

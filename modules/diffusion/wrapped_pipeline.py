@@ -20,10 +20,11 @@ import os
 from typing import Callable, Iterable, Dict, Union, List
 import safetensors
 from .model_mgr import LoRA
+from ..utils.misc import DEVICE as DEFAULT_DEVICE
 def combine_noise(noise: torch.tensor, use_noise:np.ndarray, use_noise_alpha:float):
     dtype = noise.dtype
     device = noise.device
-    use_noise = torch.from_numpy(use_noise).cuda()
+    use_noise = torch.from_numpy(use_noise).to(device=DEFAULT_DEVICE)
     a = 1-use_noise_alpha
     b = use_noise_alpha
     norm = (a**2+b**2)**0.5
@@ -305,7 +306,7 @@ class CustomPipeline:
         if(to_cat):
             embd_weights = np.concatenate([orig_embd_weights]+to_cat)
             self.orig_embd_weights = embd_weights
-            embd_weights = torch.tensor(embd_weights).cuda()
+            embd_weights = torch.tensor(embd_weights, device=DEFAULT_DEVICE)
             del text_embeddings.token_embedding
             text_embeddings.token_embedding = nn.Embedding.from_pretrained(embd_weights)
 
@@ -395,7 +396,7 @@ class CustomPipeline:
             # denoising
             if(mode==0):
                 mask_numpy = 1-(1-mask_numpy)**(1/steps)
-                mask_tensor = torch.from_numpy(mask_numpy).cuda()
+                mask_tensor = torch.from_numpy(mask_numpy).to(device=DEFAULT_DEVICE)
             for i, t in it:
                 noise_pred = self._predict_noise(latents, weights, cond_batches, nconds, noise_pred_batch_size, t)
                 if(i==len(it)-1):
@@ -410,7 +411,7 @@ class CustomPipeline:
                 else:
                     current = 1-i/steps
                     mask_current = (mask_numpy>=current).astype(np.float32) # * (mask_numpy**(1/steps))
-                    mask_tensor=torch.from_numpy(mask_current).cuda()
+                    mask_tensor=torch.from_numpy(mask_current).to(device=DEFAULT_DEVICE)
                 latents = latents*mask_tensor+latents_proper*(1-mask_tensor)
             latents = 1 / 0.18215 * latents
             image = vae.decode(latents).sample
@@ -484,7 +485,7 @@ class CustomPipeline:
             
             noise = torch.randn(init_latents.shape, generator=None, device=self.device, dtype=latents_dtype)
             if(use_noise is not None):
-                use_noise = torch.tensor(use_noise).cuda()
+                use_noise = torch.tensor(use_noise).to(device=DEFAULT_DEVICE)
                 noise = use_noise*use_noise_alpha+noise*(1-use_noise_alpha)
                 sqrsum = use_noise_alpha**2+(1-use_noise_alpha)**2
                 norm = sqrsum**0.5
@@ -582,7 +583,7 @@ class CustomPipeline:
             cat_weights1 = np.concatenate([weights0*0, weights1], axis=0)
             len_embd = ids0[0].shape[-1]
             cat_ids = np.concatenate([ids0, ids1], axis=0).reshape((-1, len_embd))
-            cat_ids = torch.tensor(cat_ids).cuda()
+            cat_ids = torch.tensor(cat_ids).to(device=DEFAULT_DEVICE)
             print("DEBUG:", cat_ids.shape)
             
             conds = text_encoder(cat_ids)[0]
@@ -644,10 +645,76 @@ class CustomPipeline:
 
             torch.cuda.empty_cache()
             return Reproducable(self.txt2img_interpolation, images, prompt0, prompt1, cfg=cfg, steps=steps, nframes=nframes, width=width, height=height, noise_pred_batch=NOISE_PRED_BATCH, use_noise=init_noise, use_noise_alpha=1)
-
-            
+        
+    def get_multi_diffusion_multiplier(self, masks, prompts, steps=25, cfg=7.5, width=512, height=768, neg_prompt = ""):
+        n_noises = 0
+        for idx, p in enumerate(prompts):
+            weight, ids = self.get_ids(p, neg_prompt=neg_prompt)
+            n_noises+=len(ids)*len(masks)
+        return n_noises*width*height*steps
+        
     @torch.no_grad()
-    def txt2img(self, prompt, cfg=7.5, steps=20, width=512, height=768, neg_prompt = "", noise_pred_batch_size=2, return_noise=False, use_noise=None, use_noise_alpha=1):
+    def multi_diffusion(self, masks, prompts, steps=25, cfg=7.5, width=512, height=768, neg_prompt = "", use_noise=None, use_noise_alpha=1, noise_pred_batch_size=NOISE_PRED_BATCH):
+        with torch.autocast("cuda"), locked(self.inference_lock):
+            tencoder = self.text_encoder
+            unet = self.unet
+            vae = self.sd_pipeline.vae
+            sched = self.sched
+
+            conds = []
+            _masks = []
+            for idx, mask in enumerate(masks):
+                mask = mask_as_numpy(mask.resize((width//8, height//8), Image.LANCZOS))
+                prompt = prompts[idx]
+                weights, idss = self.get_ids(prompt, neg_prompt=neg_prompt)
+                for jdx, w in enumerate(weights):
+                    ids = idss[jdx]
+                    cond = tencoder(torch.tensor(ids).to(device=DEFAULT_DEVICE))[0]
+                    conds.append(cond)
+                    _masks.append(mask*w)
+            masks_arr = np.stack(_masks, axis=-1)
+            center: np.ndarray = masks_arr-masks_arr.mean(axis=-1, keepdims=True)
+            # norm = center/(center.std(axis=-1, keepdims=True)+1e-6)*cfg
+            norm = center/(center.std()+1e-6)*cfg
+            
+            masks_arr = norm+1/norm.shape[-1]
+            print(masks_arr.shape)
+            # assert np.all(masks_arr.sum(axis=-1,keepdims=True)==1), masks_arr.sum(axis=-1)
+            masks = [torch.from_numpy(masks_arr[:, :,:,:,idx]).to(self.device) for idx in range(masks_arr.shape[-1])]
+            # for mask in masks:
+            #     print("weight", mask[0, 0, 0, 0])
+            
+            latents_shape = (1, unet.in_channels, height // 8, width // 8)
+            latents = torch.randn(latents_shape, generator=None, device=self.device, dtype=cond.dtype)
+
+            sched.set_timesteps(steps)
+            timesteps_tensor = sched.timesteps.to(self.device)
+            
+
+            for i, t in enumerate(self.sd_pipeline.progress_bar(timesteps_tensor)):
+                noises = []
+                for idx, cond in enumerate(conds):
+                    noise_pred = unet(latents, t, encoder_hidden_states=cond).sample
+                    noises.append(noise_pred)
+                noise = torch.zeros_like(latents)
+                for idx, mask in enumerate(masks):
+                    # print(mask.shape)
+                    noise += noises[idx]*mask
+                
+                latents = sched.step(noise, t, latents).prev_sample
+
+            latents = 1 / 0.18215 * latents
+            image = vae.decode(latents).sample
+
+            image = (image / 2 + 0.5).clamp(0, 1)
+            image = image.cpu().permute(0, 2, 3, 1).numpy()
+            image = self.sd_pipeline.numpy_to_pil(image)
+            
+            torch.cuda.empty_cache()
+            return Reproducable(self.multi_diffusion, image[0], masks, prompts, steps=steps, cfg=cfg, width=width, height=height, neg_prompt=neg_prompt)
+
+    @torch.no_grad()
+    def txt2img(self, prompt, cfg=7.5, steps=20, width=512, height=768, neg_prompt = "", noise_pred_batch_size=NOISE_PRED_BATCH, return_noise=False, use_noise=None, use_noise_alpha=1):
         with torch.autocast("cuda"), locked(self.inference_lock):
 
             text_encoder = self.text_encoder
@@ -661,7 +728,8 @@ class CustomPipeline:
             cond_num = len(weights)
             conds = []
             for i in ids:
-                cond = text_encoder(torch.tensor(i).cuda())[0]
+                print("te device", text_encoder.device)
+                cond = text_encoder(torch.tensor(i).to(device=DEFAULT_DEVICE))[0]
                 conds.append(cond)
             for idx, w in enumerate(weights):
                 cond = conds[idx]
@@ -923,14 +991,14 @@ class CustomPipeline:
         return weights, ids
 
             
-            
+if(__name__=="__main__"):
+    from modules.diffusion.model_mgr import pipe as diffusion_pipe, models, get_model
+    mask0 = Image.open(r"E:\Pics\gradient.png").convert("L")
+    mask1 = Image.fromarray(255-np.array(mask0))
+    prompt0 = "2girls, pink hair, cat ears"
+    prompt1 = "2girls, blue hair, cat ears"
+    nprompt = "worst quality"
+    model = get_model()
+    im = model.multi_diffusion([mask0, mask1], [prompt0, prompt1], width=512, height=512, neg_prompt=nprompt)
+    im.show()
 
-
-
-
-            
-            
-
-
-
-        

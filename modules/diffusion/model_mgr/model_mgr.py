@@ -11,6 +11,7 @@ from torch.nn import Module
 from os import path
 from ...utils.candy import locked, print_time
 from ..load_vae import load_ldm_vae_ckpt
+from ...utils.misc import DEVICE as DEFAULT_DEVICE
 models = {}
 
 @torch.no_grad()
@@ -80,11 +81,9 @@ def load_model(name, model_id="", vae=""):
         model.enable_xformers_memory_efficient_attention()
         if(_INFER_MODEL is None):
             print("loading model %s as base model"%name)
-            _INFER_MODEL = _load_model(model_id).to("cuda").to(torch.float16)
-            # _INFER_MODEL = StableDiffusionPipeline.from_pretrained(model_id, scheduler=sched, torch_dtype=torch.float16).to("cuda")
+            _INFER_MODEL = _load_model(model_id).to(DEFAULT_DEVICE).to(torch.float16)
             _INFER_MODEL.enable_attention_slicing()
             _INFER_MODEL.enable_xformers_memory_efficient_attention()
-            device = "cuda:0"
         if(path.exists(vae)):
             load_ldm_vae_ckpt(model.vae, vae)
         # debug_vram("after load model %s"%name)
@@ -136,12 +135,12 @@ def get_model(unets=None, vaes=None):
             debug_vram("after interp")
         p = MASTER_MODEL.sd_pipeline
         cnt = 0
-        # for model in [p.text_encoder, p.safety_checker]:
-        #     if(model is not None):
-        #         if(str(model.device)=="cuda:0"):
-        #             cnt += 1
-        #             cpu_offload(model, "cuda:0")
-        # print("offload %d models to cpu"%cnt)
+        for model in [p.safety_checker, p.vae]:
+            if(model is not None):
+                if(str(model.device)==DEFAULT_DEVICE):
+                    cnt += 1
+                    cpu_offload(model, DEFAULT_DEVICE)
+        print("offload %d models to cpu"%cnt)
         print(LOADED_UNETS, LOADED_VAES)
         return MASTER_MODEL
 class PipeDummy:
