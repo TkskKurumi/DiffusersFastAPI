@@ -12,12 +12,12 @@ class _LineFeed:
 
 
 LF = _LineFeed()
-DEBUG_SEARCH_FONT = True
+DEBUG_SEARCH_FONT = False
 def search_font(size):
     global DEBUG_SEARCH_FONT
     verbose = DEBUG_SEARCH_FONT
     DEBUG_SEARCH_FONT = False
-    ls = ["DejaVuSansMono.ttf", "/usr/share/fonts/DejaVuSansMono.ttf"]
+    ls = ["DejaVuSansMono.ttf", "/usr/share/fonts/DejaVuSansMono.ttf", "simhei.ttf"]
     for i in ls:
         if(verbose):
             print("look for %s"%i)
