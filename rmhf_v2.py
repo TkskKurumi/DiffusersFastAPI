@@ -1,4 +1,5 @@
 import argparse
+from functools import partial
 import math, os
 from termcolor import colored
 from math import sqrt
@@ -8,11 +9,12 @@ from PIL import Image
 from os import path
 from modules.diffusion.model_mgr import model_mgr
 from modules.diffusion.model_mgr import load_model
-from modules.diffusion.wrapped_pipeline import CustomPipeline
+from modules.diffusion.wrapped_pipeline import CustomPipeline, WeightedPrompt
 from modules.utils.diffuers_conversion import save_ldm
 from modules.utils.pil_layout import RichText, Column, Row
 from modules.utils.pil_layout.resize import limit as limit_image_size
 from modules.utils.candy import print_time
+from modules.utils.misc import normalize_resolution
 from rmhf2 import permute
 from tqdm import tqdm, trange
 import json, random, shutil
@@ -111,6 +113,7 @@ class Interpolate:
                 if(np.all(diff<1e-6)):
                     dry = True
             self._current_norm = w
+        assert not (np.any(np.isnan(self._current_norm)))
         if(not dry):
             with print_time("interpolate model %s" % self.name):
                 ret = {}
@@ -120,45 +123,117 @@ class Interpolate:
                     for model_idx, sd in enumerate(self.states):
                         model_tensor = sd[key]
                         model_w = w[key_idx, model_idx]
-                        tensor += model_tensor*model_w
+                        if(abs(model_w)>1e-6):
+                            tensor += model_tensor*model_w
                     ret[key] = tensor
                 self.dst_model.load_state_dict(ret)
         self.display()
+    def dump_detail(self, prt):
+        rows = []
+        rows.append((self.name, *self.names))
+        for key_idx, key in enumerate(self.keys):
+            ws = self._current_norm[key_idx]
+            row = [self.name+"."+key]
+            for w in ws:
+                row.append("%.2f%%"%(w*100))
+            rows.append(row)
+        n_columns = len(rows[0])
+        column_w = []
+        for i in range(n_columns):
+            w = 0
+            for jdx, j in enumerate(rows):
+                w = max(w, len(j[i]))
+            column_w.append(w)
+        for row_i, row in enumerate(rows):
+            prt("| ", end="")
+            for col_i, elem in enumerate(row):
+                if(col_i):
+                    prt(" ", end="")
+                compensate = column_w[col_i]-len(elem)
+                prt(elem+" "*compensate, end=" |")
+            prt("")
+        
+
+
+
+        
 
 class Optimize:
-    def __init__(self, i: Interpolate, alpha=0.85, beta = None, eps=1e-7, initial=None):
+    def __init__(self, i: Interpolate, initial=None):
         self.i = i
-        self.i.apply(i.zeros())
         if(initial is None):
-            self.w        = i.zeros()
+            self.w = i.zeros()
         else:
-            self.w        = i.zeros()+initial
+            self.w = i.zeros()+initial
         print("init", self.i.name, self.w.mean(axis=0))
-        self.momentum = i.zeros()
-        self.m2       = i.zeros()
-        self.alpha = alpha
-        if(beta is None):
-            self.beta = alpha**2
-        else:
-            self.beta  = beta
-        self.eps   = eps
+        self.i.apply(self.w)
     def step(self, w, lr):
-        self.momentum = self.momentum*self.alpha + w*(1-self.alpha)                   # moving mean
-        self.m2       = self.m2*self.beta + self.momentum*self.momentum*(1-self.beta) # w is not the accurate gradient, use momentum as gradient
-        deltaw = self.momentum/(np.sqrt(self.m2)+self.eps)*lr
-        print(self.i.name, "moving", np.abs(deltaw).mean())
-        self.w = self.w+deltaw
+        raise NotImplementedError()
+    def dummy_step(self, w, lr):
+        raise NotImplementedError()
     def randn(self):
         return self.i.randn()
+    @property
+    def momentum(self):
+        raise NotImplementedError()
+
+class OptimizeAdamLike(Optimize):
+    def __init__(self, i: Interpolate, initial=None, beta1=0.9, beta2=0.8, decay=0.02, eps=1e-6):
+        super().__init__(i, initial)
+        self.init_w = self.w
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.eps   = eps
+        self.decay = decay
+        self.m1 = i.zeros()
+        self.m2 = i.zeros()
     def dummy_step(self, w, lr):
-        momentum = self.momentum*self.alpha + w*(1-self.alpha)
-        m2       = self.m2*self.beta + momentum*momentum*(1-self.beta)
-        deltaw = momentum/(np.sqrt(m2)+self.eps)*lr
-        return self.w+deltaw
+        m1 = self.m1*self.beta1 + w*(1-self.beta1)
+        g2 = m1*m1 # w is noise, use moving avg for m2
+        m2 = self.m2*self.beta2 + g2*(1-self.beta2)
+        forward = m1/(m2+self.eps) - self.decay*(self.w-self.init_w)
+        w = self.w+lr*forward
+        return w, (m1, m2, forward, w)
+    def step(self, w, lr):
+        w, states = self.dummy_step(w, lr)
+        self.m1, self.m2, forward, w = states
+        print(self.i.name, "moving", np.abs(lr*forward).mean())
+        self.w = w
+        return w
+    @property
+    def momentum(self):
+        return self.m1
+
+class OptimizeLionLike(Optimize):
+    def __init__(self, i: Interpolate, initial=None, beta1=0.95, beta2=0.8, decay=0.2):
+        super().__init__(i, initial)
+        self.init_w = self.w
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.decay = decay
+        self.m1 = i.zeros()
+    def dummy_step(self, w, lr):
+        c = self.m1*self.beta2 + w*(1-self.beta2)
+        m1 = self.m1*self.beta1 + w*(1-self.beta1)
+        
+        forward = np.sign(c)-self.decay*(self.w-self.init_w)
+
+        w = self.w+lr*forward
+        return w, (c, m1, forward, w)
+    def step(self, w, lr):
+        w, states = self.dummy_step(w, lr)
+        c, self.m1, forward, w = states
+        print(self.i.name, "moving", np.abs(lr*forward).mean())
+        self.w = w
+        return w
+    @property
+    def momentum(self):
+        return self.m1
+
 
 
 class ModelConfig:
-    def __init__(self, pth, name=None, enabled=True, vae="", init=1):
+    def __init__(self, pth, name=None, enabled=True, vae="", init=1, **kwargs):
         self.pth = pth
         if(name is None):
             self.name = path.splitext(path.basename(pth))[0]
@@ -176,14 +251,21 @@ def add_title(img, text, fill=BLACK):
     RT = RichText([text], font_size=font_size, width=int(w*0.9), fill=fill)
     COL = Column([img, RT], bg=WHITE)
     return COL.render()
-
+def _sample_params(args, sample_prompt):
+    pos, neg = sample_prompt()
+    resolution = 512*512*2
+    ar_min = math.log(9/16)
+    ar_max = math.log(16/9)
+    ar = math.exp(ar_min + random.random()*(ar_max-ar_min))
+    width, height = normalize_resolution(ar, 1, resolution)
+    return (lambda **kwargs: kwargs)(prompt=pos, steps=args.infer_steps, width=width, height=height, neg_prompt=neg)
 if(__name__=="__main__"):
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-config", type=str,
                         required=True, help="specify model paths in this file")
     parser.add_argument("--prompt-config", type=str, required=True)
     parser.add_argument("--steps", type=int, default=40)
-    parser.add_argument("--lr", type=float, default=2)
+    parser.add_argument("--lr", type=float, default=4)
     parser.add_argument("--lr_final", type=float, default=None)
     parser.add_argument("--by_model", type=float, default=1)
     parser.add_argument("--infer-steps", type=int, default=40)
@@ -200,7 +282,7 @@ if(__name__=="__main__"):
     else:
         sample_prompt = lambda:get_prompt_v2(prompt_dict)
     
-    prompt, negative = sample_prompt()
+    sample_params = partial(_sample_params, args, sample_prompt)
 
     with open(args.model_config, "r") as f:
         model_dict = json.load(f)
@@ -208,7 +290,7 @@ if(__name__=="__main__"):
     lr_init = args.lr
     lr_final = args.lr_final
     if(lr_final is None):
-        lr_final = min(lr_init*0.8, 0.45)
+        lr_final = min(lr_init*0.5, 2)
     def lr_sched(s):
         global lr_init, lr_final
         s = s/steps
@@ -241,10 +323,10 @@ if(__name__=="__main__"):
         Interpolate("text_encoder", _model.text_encoder, tes, model_names),
     ]
     opts = [
-        Optimize(i, initial=init) for i in interps
+        OptimizeLionLike(i, initial=init) for i in interps
     ]
 
-    validate = model.txt2img(prompt, neg_prompt = negative, steps=infer_steps)
+    validate = model.txt2img(**sample_params())
 
     step_images = []
     compare_models = []
@@ -281,13 +363,13 @@ if(__name__=="__main__"):
                 prompt, negative = sample_prompt()
 
                 for idx, opt in enumerate(opts):
-                    w = opt.dummy_step(-ws[idx], lr)
+                    w, states = opt.dummy_step(-ws[idx], lr)
                     opt.i.apply(w)
                 
-                repro = model.txt2img(prompt, neg_prompt = negative, steps=infer_steps)
+                repro = model.txt2img(**sample_params())
 
                 for idx, opt in enumerate(opts):
-                    w = opt.dummy_step(ws[idx], lr)
+                    w, states = opt.dummy_step(ws[idx], lr)
                     opt.i.apply(w)
                 
                 img0 = repro.result
@@ -365,12 +447,29 @@ if(__name__=="__main__"):
             break
     print("saving result")
     save_ldm("./rmhf.safetensors", _model)
+    with open("./rmhf.log", "w") as f:
+        prt = partial(print, file=f)
+        for opt in opts:
+            opt.i.dump_detail(prt)
     print("saved")
     if(path.exists("rmhf_samples")):
         shutil.rmtree("rmhf_samples")
     os.makedirs("rmhf_samples")
-    for i in range(10):
-        prompt, negative = sample_prompt()
-        repro = model.txt2img(prompt, neg_prompt = negative, steps=infer_steps)
+    for i in range(50):
+        params = sample_params()
+        pro = params["prompt"]
+        neg = params["neg_prompt"]
+        repro = model.txt2img(**params)
         img = repro.result
         img.save(path.join("rmhf_samples", "%02d.png"%i))
+        with open(path.join("rmhf_samples", "%02d.caption"%i), "w") as f:
+            wp = WeightedPrompt(pro + "/*" + neg + "*/")
+            pro, neg = [], []
+            for k, v in wp.as_dict().items():
+                if(k > 0):
+                    pro.append(v)
+                else:
+                    neg.append(v)
+            print("prompt:", ", ".join(pro), file=f)
+            print("negative:", ", ".join(neg), file=f)
+

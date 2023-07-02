@@ -33,10 +33,12 @@ class WeightedPrompt:
         ret = {}
         for w, s in self:
             ret[w] = ret.get(w, [])
-            if(ret[w]):
-                ret[w]+=", "
-            ret[w] += s
+            ret[w].append(s)
+        for k, v in ret.items():
+            ret[k] = ", ".join(v)
+            ret[k] = re.sub("( *, *)+", ", ", ret[k])
         return ret
 if(__name__=="__main__"):
     prompt = "hello, {world}, /*bad guy*/, ok"
     print(list(WeightedPrompt(prompt)))
+    print(WeightedPrompt(prompt).as_dict())

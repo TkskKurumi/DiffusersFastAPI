@@ -114,7 +114,7 @@ class IMG2IMGTicket(Ticket):
         self.params = {}
     @property
     def accepted_params(self):
-        return ["prompt", "neg_prompt", "guidance", "alpha", "ddim_noise", "loras"]
+        return ["prompt", "neg_prompt", "guidance", "alpha", "ddim_noise", "loras", "beta"]
     def param(self, **kwargs):
         for key in self.accepted_params:
             if (key in kwargs):
@@ -163,7 +163,8 @@ class IMG2IMGTicket(Ticket):
         eta = self.params.get("ddim_noise", 0) # eta for ddim
         steps = int(IMG2IMGTicket.STEP / alpha)
         make_ret = lambda *args, **kwargs:(args, kwargs)
-        return make_ret(pro, orig_image, alpha=alpha, steps=steps, neg_prompt=neg_pro, cfg=guidance, eta=eta)
+        beta = self.params.get("beta", 1)
+        return make_ret(pro, orig_image, alpha=alpha, steps=steps, neg_prompt=neg_pro, cfg=guidance, eta=eta, beta=beta)
     def get_n(self):
         args, kwargs = self.form_pipe_kwargs()
         return diffusion_pipe.get_img2img_multiplier(*args, **kwargs)
@@ -596,6 +597,7 @@ class TicketParam(BaseModel):
     neg_prompt: str | NoneType = None
     aspect: float | NoneType = None
     alpha: float | NoneType = None
+    beta: float | NoneType = None
     prompt1: str | NoneType = None
     multi_prompts: NoneType | List[str] = None
     nframes: int | NoneType | List[float] = 8

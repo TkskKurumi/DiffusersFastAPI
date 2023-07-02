@@ -355,7 +355,7 @@ class CustomPipeline:
             self.debug_ids(weights, ids)
             conds = []
             for i in ids:
-                cond = text_encoder(torch.tensor(i).cuda())[0]
+                cond = text_encoder(torch.tensor(i).to(device=DEFAULT_DEVICE))[0]
                 conds.append(cond)
             cond_batches = split_batch(conds, noise_pred_batch_size, torch_cat=True)
             nconds = len(conds)
@@ -460,7 +460,7 @@ class CustomPipeline:
             cond_num = len(weights)
             conds = []
             for i in ids:
-                cond = text_encoder(torch.tensor(i).cuda())[0]
+                cond = text_encoder(torch.tensor(i).to(device=DEFAULT_DEVICE))[0]
                 conds.append(cond)
             cond_batches = dict()
             for i in range(0, cond_num, noise_pred_batch_size):
@@ -508,14 +508,19 @@ class CustomPipeline:
             rate_latent = beta
             rate_latent = beta**(1/steps/alpha)
             if(print_progress):
-                it = enumerate(self.sd_pipeline.progress_bar(timesteps))
+                it = list(enumerate(self.sd_pipeline.progress_bar(timesteps)))
             else:
-                it = enumerate(timesteps)
+                it = list(enumerate(timesteps))
             for i, t in it:
                 noise_pred = self._predict_noise(latents, weights, cond_batches, cond_num, noise_pred_batch_size, t)
                 latents = sched.step(noise_pred, t, latents).prev_sample
                 if(beta!=1):
-                    latents_proper = sched.add_noise(orig_latents, noise, torch.tensor([t]))
+                    if(i+1<len(it)):
+                        i1, t1 = it[i+1]
+                        latents_proper = sched.add_noise(orig_latents, noise, torch.tensor([t1]))
+                    else:
+                        latents_proper = orig_latents
+
                     latents = (latents*rate_latent)+(latents_proper*(1-rate_latent))
             latents = 1 / 0.18215 * latents
             image = vae.decode(latents).sample
