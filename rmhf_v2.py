@@ -131,6 +131,7 @@ class Interpolate:
     def dump_detail(self, prt):
         rows = []
         rows.append((self.name, *self.names))
+        rows.append(["-"]*len(rows[0]))
         for key_idx, key in enumerate(self.keys):
             ws = self._current_norm[key_idx]
             row = [self.name+"."+key]
@@ -205,7 +206,7 @@ class OptimizeAdamLike(Optimize):
         return self.m1
 
 class OptimizeLionLike(Optimize):
-    def __init__(self, i: Interpolate, initial=None, beta1=0.95, beta2=0.8, decay=0.2):
+    def __init__(self, i: Interpolate, initial=None, beta1=0.95, beta2=0.8, decay=0.1):
         super().__init__(i, initial)
         self.init_w = self.w
         self.beta1 = beta1
@@ -233,7 +234,7 @@ class OptimizeLionLike(Optimize):
 
 
 class ModelConfig:
-    def __init__(self, pth, name=None, enabled=True, vae="", init=1, **kwargs):
+    def __init__(self, pth, name=None, enabled=True, vae="", init=1, src=None, **kwargs):
         self.pth = pth
         if(name is None):
             self.name = path.splitext(path.basename(pth))[0]
@@ -242,6 +243,7 @@ class ModelConfig:
         self.enabled = enabled
         self.vae = vae
         self.init = init
+        self.src = src
 BLACK = (0, 0, 0, 255)
 WHITE = (255, 255, 255, 255)
 GREEN = (0, 255, 255, 255)
@@ -251,12 +253,14 @@ def add_title(img, text, fill=BLACK):
     RT = RichText([text], font_size=font_size, width=int(w*0.9), fill=fill)
     COL = Column([img, RT], bg=WHITE)
     return COL.render()
-def _sample_params(args, sample_prompt):
+def _sample_params(args, sample_prompt, ar=None):
     pos, neg = sample_prompt()
     resolution = 512*512*2
-    ar_min = math.log(9/16)
-    ar_max = math.log(16/9)
-    ar = math.exp(ar_min + random.random()*(ar_max-ar_min))
+    # ar_min = math.log(9/16)
+    # ar_max = math.log(16/9)
+    # ar = math.exp(ar_min + random.random()*(ar_max-ar_min))
+    if(ar is None):
+        ar = random.choice([9/16, 5/7, 16/9])
     width, height = normalize_resolution(ar, 1, resolution)
     return (lambda **kwargs: kwargs)(prompt=pos, steps=args.infer_steps, width=width, height=height, neg_prompt=neg)
 if(__name__=="__main__"):
@@ -326,7 +330,7 @@ if(__name__=="__main__"):
         OptimizeLionLike(i, initial=init) for i in interps
     ]
 
-    validate = model.txt2img(**sample_params())
+    validate = model.txt2img(**sample_params(ar=5/7))
 
     step_images = []
     compare_models = []
@@ -343,11 +347,12 @@ if(__name__=="__main__"):
     R.render().convert("RGB").save("compare_models.jpg")
 
     for step in range(args.steps):
+        lr_boost = 1
         try:
-            lr = lr_sched(step)
-            print("Step: %03d, LR: %.8f"%(step, lr))
-            
+            lr = lr_sched(step)*lr_boost
+
             while(True):
+                print("Step: %03d, LR: %.8f"%(step, lr))
 
                 bym = args.by_model
                 ws = []
@@ -402,11 +407,7 @@ if(__name__=="__main__"):
                         break
                     elif(i == "alt"):
                         regen=True
-                        break
-                    elif(i=="up"):
-                        regen=True
-                        lr_init*=1.05
-                        lr_final*=1.05
+                        lr_boost*=1.1
                         break
                 if(not regen):
                     break
@@ -434,21 +435,37 @@ if(__name__=="__main__"):
                     add_title(img1, ":("),
                     add_title(imgv, v)
                 ])
-            step_images.append(R.render())
-            Column(step_images).render().convert("RGB").save("./steps.jpg")
+            
+            os.makedirs("rmhf2/steps", exist_ok=True)
+            R.render().save("rmhf2/steps/%03d.png"%(step+1))
+
+
 
             imgv_titled = add_title(imgv, 'merged')
-            R = Row([
-                Column([add_title(i, model_names[idx]), imgv_titled])
-                for idx, i in enumerate(compare_models)
-            ])
+            compare_model_row = []
+            for idx, mod in enumerate(models):
+                contrib_unet = opts[0].i._current_norm[:, idx].mean()
+                compare_model_row.append(
+                    Column([
+                        add_title(compare_models[idx], "%s - %.1f%%"%(mod.name, contrib_unet*100)),
+                        imgv_titled]
+                    )
+                )
+            R = Row(compare_model_row)
             R.render().convert("RGB").save("compare_models.jpg")
         except KeyboardInterrupt:
             break
     print("saving result")
     save_ldm("./rmhf.safetensors", _model)
-    with open("./rmhf.log", "w") as f:
+    with open("./rmhf.md", "w") as f:
         prt = partial(print, file=f)
+        prt("This is a merged model of following models. Huge thanks for these amazing model creators.")
+        for cfg in models:
+            if(cfg.src):
+                prt("+ [%s](%s)"%(cfg.name, cfg.src))
+            else:
+                prt("+", cfg.name)
+        prt()
         for opt in opts:
             opt.i.dump_detail(prt)
     print("saved")

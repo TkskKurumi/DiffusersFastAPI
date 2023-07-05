@@ -24,7 +24,8 @@ def search_font(size):
         try:
             return ImageFont.truetype(i, size=size)
         except Exception:
-            print("not found")
+            if(verbose):
+                print(i, "not found")
     print("default font")
     return ImageFont.load_default()
 class RichText(BaseWidget):
