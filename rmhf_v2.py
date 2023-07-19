@@ -15,6 +15,7 @@ from modules.utils.pil_layout import RichText, Column, Row
 from modules.utils.pil_layout.resize import limit as limit_image_size
 from modules.utils.candy import print_time
 from modules.utils.misc import normalize_resolution
+from modules.utils.debug_vram import debug_vram
 from rmhf2 import permute
 from tqdm import tqdm, trange
 import json, random, shutil
@@ -97,20 +98,25 @@ class Interpolate:
         return np.random.normal(size=(self.n_ch, self.n_model))
     
     def apply(self, w, do_softmax=True):
+        EPS = 1e-5
         dry = False
+        debug_vram("rmhf_v2.py:102")
+        prev_w = self._current_norm
+        prev_sd = self.dst_model.state_dict()
+        debug_vram("rmhf_v2.py:105")
         if(do_softmax):
             self._current = w
             w = softmax(w)
             if(self._current_norm is not None):
                 diff = np.abs(w-self._current_norm)
-                if(np.all(diff<1e-6)):
+                if(np.all(diff<EPS)):
                     dry = True
             self._current_norm = w
         else:
             self._current = np.log(w)
             if(self._current_norm is not None):
                 diff = np.abs(w-self._current_norm)
-                if(np.all(diff<1e-6)):
+                if(np.all(diff<EPS)):
                     dry = True
             self._current_norm = w
         assert not (np.any(np.isnan(self._current_norm)))
@@ -119,12 +125,21 @@ class Interpolate:
                 ret = {}
                 ls = list(enumerate(self.keys))
                 for key_idx, key in tqdm(ls):
-                    tensor = 0
-                    for model_idx, sd in enumerate(self.states):
-                        model_tensor = sd[key]
-                        model_w = w[key_idx, model_idx]
-                        if(abs(model_w)>1e-6):
-                            tensor += model_tensor*model_w
+                    _dry = False
+                    if(prev_w is not None):
+                        ws = w[key_idx]
+                        prev_ws = prev_w[key_idx]
+                        diff = np.abs(ws-prev_ws)
+                        if(np.all(diff<EPS)):
+                            tensor = prev_sd[key]
+                            _dry = True
+                    if(not _dry):
+                        tensor = 0
+                        for model_idx, sd in enumerate(self.states):
+                            model_tensor = sd[key]
+                            model_w = w[key_idx, model_idx]
+                            if(abs(model_w)>1e-6):
+                                tensor += model_tensor*model_w
                     ret[key] = tensor
                 self.dst_model.load_state_dict(ret)
         self.display()
@@ -157,7 +172,20 @@ class Interpolate:
 
 
 
+def check_castable(arr0, arr1):
+    shape0 = arr0.shape
+    shape1 = arr1.shape
+    if(len(shape0) > len(shape1)):
+        return check_castable(arr1, arr0)
+    print(shape0, shape1)
+    for idx, i in enumerate(shape0):
+        jdx = idx-len(shape0)
+        j = shape1[jdx]
+        if(i!=1 and j!=1 and i!=j):
+            return False
+    return True
         
+    
 
 class Optimize:
     def __init__(self, i: Interpolate, initial=None):
@@ -165,7 +193,16 @@ class Optimize:
         if(initial is None):
             self.w = i.zeros()
         else:
-            self.w = i.zeros()+initial
+            z = i.zeros()
+            if(not check_castable(z, np.array(initial))):
+                print("WARNING: not using initial weight for", i.name, "since shape doesn't match", z.shape, np.array(initial).shape)
+                self.w = z
+            else:
+                initw = str(initial)
+                if(len(initw)>255):
+                    initw = initw[:252]+"..."
+                print("init", i.name, initw)
+                self.w = i.zeros()+initial
         print("init", self.i.name, self.w.mean(axis=0))
         self.i.apply(self.w)
     def step(self, w, lr):
@@ -260,9 +297,58 @@ def _sample_params(args, sample_prompt, ar=None):
     # ar_max = math.log(16/9)
     # ar = math.exp(ar_min + random.random()*(ar_max-ar_min))
     if(ar is None):
-        ar = random.choice([9/16, 5/7, 16/9])
+        ar = random.choice([9/16, 5/7, 3/4, 5/8, 1, 4/3])
     width, height = normalize_resolution(ar, 1, resolution)
     return (lambda **kwargs: kwargs)(prompt=pos, steps=args.infer_steps, width=width, height=height, neg_prompt=neg)
+
+def do_compare_only(n: int, n_models: int, opts: List[Optimize], sample_params, model: CustomPipeline, model_names):
+    
+    repros = [None for i in range(n)]
+    rows = []
+
+    for i_model in range(n_models):
+        for opt in opts:
+            w = opt.i.zeros()
+            w[:, i_model] += 1
+            opt.i.apply(w, False)
+        model_images = []
+        for idx, repro in enumerate(repros):
+            if(repro is None):
+                ar = random.choice([5/7, 9/16])
+                repro = model.txt2img(**sample_params(ar=ar))
+                img = repro.result
+                repros[idx] = repro
+            else:
+                img = repro.reproduce().result
+            model_images.append(add_title(img, text=model_names[i_model]))
+        rows.append(Row(model_images))
+    col = Column(rows)
+    col.render().save("compare_models.png")
+    
+
+    if(path.exists("rmhf_samples")):
+        shutil.rmtree("rmhf_samples")
+    os.makedirs("rmhf_samples")
+    for i in range(256):
+        params = sample_params()
+        pro = params["prompt"]
+        neg = params["neg_prompt"]
+        repro = model.txt2img(**params)
+        img = repro.result
+        img.save(path.join("rmhf_samples", "%02d.png"%i))
+        with open(path.join("rmhf_samples", "%02d.caption"%i), "w") as f:
+            wp = WeightedPrompt(pro + "/*" + neg + "*/")
+            pro, neg = [], []
+            for k, v in wp.as_dict().items():
+                if(k > 0):
+                    pro.append(v)
+                else:
+                    neg.append(v)
+            print("prompt:", ", ".join(pro), file=f)
+            print("negative:", ", ".join(neg), file=f)
+
+
+
 if(__name__=="__main__"):
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-config", type=str,
@@ -273,6 +359,7 @@ if(__name__=="__main__"):
     parser.add_argument("--lr_final", type=float, default=None)
     parser.add_argument("--by_model", type=float, default=1)
     parser.add_argument("--infer-steps", type=int, default=40)
+    parser.add_argument("--compare-and-exit", type=int, default=0)
     args = parser.parse_args()
     infer_steps = args.infer_steps
 
@@ -319,23 +406,41 @@ if(__name__=="__main__"):
         tes.append(model.text_encoder.state_dict())
 
     
-    _model = model_mgr._INFER_MODEL
-    model = CustomPipeline(_model)
-    init    = [math.log(i.init) for i in models]
-    interps = [
+    _model   = model_mgr._INFER_MODEL
+    model    = CustomPipeline(_model)
+    init_cfg = [math.log(i.init) for i in models]
+    interps  = [
         Interpolate("unet", _model.unet, unets, model_names),
         Interpolate("text_encoder", _model.text_encoder, tes, model_names),
     ]
+    init  = {}
+    saved = {}
+    if(path.exists("weights.npz")):
+        saved = np.load("weights.npz")
+    for i in interps:
+        init[i.name] = init_cfg
+        if(i.name in saved):
+            w = saved[i.name]
+            if(check_castable(w, i.zeros())):
+                bym = args.by_model
+                init[i.name] = (w+np.array(init_cfg)*bym)/sqrt(1+bym*bym)
+                continue
+
     opts = [
-        OptimizeLionLike(i, initial=init) for i in interps
+        OptimizeLionLike(i, initial=init.get(i.name, None)) for i in interps
     ]
+
+    n_models = len(models)
+
+    if(args.compare_and_exit):
+        do_compare_only(args.compare_and_exit, n_models, opts, sample_params, model, model_names)
 
     validate = model.txt2img(**sample_params(ar=5/7))
 
     step_images = []
     compare_models = []
 
-    n_models = len(models)
+    
     for i_model in range(n_models):
         for opt in opts:
             w = opt.i.zeros()
@@ -349,9 +454,8 @@ if(__name__=="__main__"):
     for step in range(args.steps):
         lr_boost = 1
         try:
-            lr = lr_sched(step)*lr_boost
-
             while(True):
+                lr = lr_sched(step)*lr_boost
                 print("Step: %03d, LR: %.8f"%(step, lr))
 
                 bym = args.by_model
@@ -456,6 +560,10 @@ if(__name__=="__main__"):
         except KeyboardInterrupt:
             break
     print("saving result")
+    
+    weights = {opt.i.name: opt.i._current for opt in opts}
+    np.savez("weights.npz", **weights)
+
     save_ldm("./rmhf.safetensors", _model)
     with open("./rmhf.md", "w") as f:
         prt = partial(print, file=f)
