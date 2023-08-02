@@ -68,11 +68,14 @@ def _load_model(model_id):
     else:
         model = StableDiffusionPipeline.from_pretrained(model_id, scheduler=sched, torch_dtype=torch.float16)
     return model
-
+MODEL_BY_ID = {}
 def load_model(name, model_id="", vae=""):
     with locked(MODEL_LOADER_LOCK):
-        global _INFER_MODEL
-        if(not model_id):
+        global _INFER_MODEL, MODEL_BY_ID
+        if (model_id in MODEL_BY_ID):
+            models[name] = MODEL_BY_ID[model_id]
+            return MODEL_BY_ID[model_id]
+        if (not model_id):
             model_id = name
         # save vram
         print("loading model %s"%name)
@@ -88,6 +91,7 @@ def load_model(name, model_id="", vae=""):
             load_ldm_vae_ckpt(model.vae, vae)
         # debug_vram("after load model %s"%name)
         models[name] = model
+        MODEL_BY_ID[model_id] = model
         return model
         
 
