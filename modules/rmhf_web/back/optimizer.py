@@ -44,7 +44,7 @@ class Optimize:
     
 
 class OptimizeLionLike(Optimize):
-    def __init__(self, i: Interpolate, initial=None, beta1=0.95, beta2=0.8, decay=0.1):
+    def __init__(self, i: Interpolate, initial=None, beta1=0.95, beta2=0.5, decay=0.01):
         super().__init__(i, initial)
         self.init_w = self.w
         self.beta1 = beta1

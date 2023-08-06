@@ -164,8 +164,14 @@ def _prepare_init_weights(preload, unet_shape, text_encoder_shape):
     text_encoder_init = np.stack(text_encoder_init, axis=-1)
 
     unet_init = np.log(unet_init/unet_init.sum(axis=1, keepdims=True))
+    if(np.any(np.isnan(unet_init))):
+        print("WARNING: unet init weights has nan")
+        unet_init[np.isnan(unet_init)]  = 0
+    
     text_encoder_init = np.log(text_encoder_init/text_encoder_init.sum(axis=1, keepdims=True))
-
+    if (np.any(np.isnan(text_encoder_init))):
+        print("WARNING: te init weights has nan")
+        text_encoder_init[np.isnan(text_encoder_init)] = 0
     return unet_init, text_encoder_init
 
 def load_w(pth="./rmhf.npz"):

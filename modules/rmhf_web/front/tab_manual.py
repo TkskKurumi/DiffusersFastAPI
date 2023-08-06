@@ -4,6 +4,8 @@ from .gradio_helper import ThenChain
 from .. import constants
 import numpy as np
 from ..back.generation import get_n_models, get_model_index, apply_model, StableDraw
+from ..back.interp import softmax
+from functools import partial
 
 class TabManualAdjust:
     def __init__(self):
@@ -15,13 +17,17 @@ class TabManualAdjust:
         self.radios = []
         with gr.Tab("manual"):
             self.label = gr.Label(label="Model Contrib")
-            for i in range(constants.MAX_MODELS):
-                radio = gr.Radio(["-1", "+1"], type="value", visible=False)
-                self.radios.append(radio)
-            with gr.Row():
-                self.btn_do = gr.Button("Run")
-                self.btn_refresh = gr.Button("⟳")
-
+            with gr.Blocks():
+                for i in range(constants.MAX_MODELS):
+                    radio = gr.Radio(["-1", "+1"], type="value", visible=False)
+                    self.radios.append(radio)
+                with gr.Row():
+                    self.btn_do_rev = gr.Button("Run-Reverse")
+                    self.btn_do = gr.Button("Run")
+                    self.btn_refresh = gr.Button("⟳")
+            with gr.Blocks():
+                self.slide_over = gr.Slider(value=1, minimum=1, maximum=5)
+                self.btn_do_over = gr.Button("Over 1 contrib")
         self._has_widgets = True
 
     
@@ -93,7 +99,8 @@ class TabManualAdjust:
 
         def foo():
             opt_unet = learning.OPTS[0]
-            w = opt_unet.i._current_norm
+            # w = opt_unet.i._current_norm
+            w = softmax(opt_unet.w)
             w_models = np.mean(w, axis=0)
             model_w = {model.name:w_models[idx] for idx, model in enumerate(learning.MODELS)}
             model_w = gr.Label.update(value=model_w)
@@ -112,8 +119,36 @@ class TabManualAdjust:
     def register_run(self):
         self.init_widgets()
         tch = ThenChain()
-        tch.start(self.btn_do.click, lambda:None, None, None)
-        self.register_then_compare(tch)
+        
+        def foo(forward, learning_rate, *radios):
+            w = []
+            for idx, r in enumerate(radios):
+                if(idx<get_n_models()):
+                    w.append(float(r))
+            w = np.array(w)
+            w = (w-w.mean())/w.std()
+            print(w)
+            for opt in learning.OPTS:
+                # opt.step(w, learning_rate)
+                opt.w += w*learning_rate*forward
+            
+        
+        tch.start(self.btn_do.click, partial(foo, 1), [self._tab_main.slide_lr]+self.radios, None)
+        self.register_then_update_contrib(tch)
+        
+        tch = ThenChain()
+        tch.start(self.btn_do_rev.click, partial(foo, -1), [self._tab_main.slide_lr]+self.radios, None)
+        self.register_then_update_contrib(tch)
+
+        def apply_overdrive(ratio):
+            for i in learning.INTERPS:
+                w = i._current_norm
+                w = (w-1/i.n_model)*ratio + 1/i.n_model
+                i.apply(w, False)
+
+        tch = ThenChain()
+        tch.start(self.btn_do_over.click, apply_overdrive, [self.slide_over], None)
+        tch.showlabel(self.label, "OK")
 
     def register(self):
         self.register_run()
