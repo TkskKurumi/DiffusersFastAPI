@@ -58,14 +58,14 @@ def lora_compression(matrix: np.ndarray, rank, iter=3, dtype=np.float16, verbose
     return A, B, res_norm2
 
 
-def extract_from_dict(module_name, rank, base_sd, tar_sd):
+def extract_from_dict(module_name, rank, base_sd, tar_sd, dtype=np.float16):
     key = module_name+".weight"
     delta = tar_sd[key]-base_sd[key]
     delta_np = delta.cpu().numpy()
-    lora_up, lora_down, residual = lora_compression(delta_np, rank)
+    lora_up, lora_down, residual = lora_compression(delta_np, rank, dtype=dtype)
     return lora_up, lora_down, residual
 
-def extract_from_models(base_model, tar_model, rank=None, rank_alpha=0.05):
+def extract_from_models(base_model, tar_model, rank=None, rank_alpha=0.05, dtype=np.float16):
     ret = {}
     def is_suitable_for_lora(submodule):
         classname = submodule.__class__.__name__
@@ -87,7 +87,7 @@ def extract_from_models(base_model, tar_model, rank=None, rank_alpha=0.05):
                     _rank = int(max(_rank, 1))
                 else:
                     _rank = rank
-                lora_up, lora_down, res = extract_from_dict(name, _rank, base_sd, tar_sd)
+                lora_up, lora_down, res = extract_from_dict(name, _rank, base_sd, tar_sd, dtype=dtype)
                 key = prefix+"_"+name.replace(".", "_")
                 ret[key+'.lora_up.weight'] = torch.from_numpy(lora_up)
                 ret[key+'.lora_down.weight'] = torch.from_numpy(lora_down)
@@ -111,13 +111,18 @@ if (__name__=="__main__"):
     else:
         sdbase = r"D:\StableDiffusion\BaseModels\RMHF\RMHF-Anime-V4\rmhf.safetensors"
         model_base = model_mgr.load_model("base", sdbase)
+        rank_alpha = 0.25
         for model, model_name in [
+            (r"D:\StableDiffusion\BaseModels\Realistic-2.5D\fantexiV09beta_fantexiV09beta.ckpt", "fantexi"),
             (r"D:\StableDiffusion\BaseModels\Anime\Cute\cuteyukimixAdorable_neochapter2.safetensors", "cute_yuki"),
-            (r"D:\StableDiffusion\BaseModels\Anime\Cute\cocotifacute_v20.safetensors", "cococute"),
-            (r"D:\StableDiffusion\BaseModels\Anime\Cute\nextgenmix_r28Bakedvae.safetensors", "next_gen")
+            # (r"D:\StableDiffusion\BaseModels\Anime\Cute\cocotifacute_v20.safetensors", "cococute"),
+            # (r"D:\StableDiffusion\BaseModels\Anime\Cute\nextgenmix_r28Bakedvae.safetensors", "next_gen"),
+            # (r"D:\StableDiffusion\BaseModels\Anime\blazingDrive_V02.safetensors", "BlazingDrive"),
+            
+            
         ]:
             model_tar = model_mgr.load_model(model_name, model)
             
-            lora = extract_from_models(model_base, model_tar, rank=None, rank_alpha=0.03)
+            lora = extract_from_models(model_base, model_tar, rank=None, rank_alpha=rank_alpha, dtype=np.float32)
 
-            save_file(lora, "%s_ada_3%%.safetensors"%model_name)
+            save_file(lora, "%s_ada_%d%%_fp32.safetensors"%(model_name, rank_alpha*100))
