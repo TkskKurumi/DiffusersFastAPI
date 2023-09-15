@@ -10,6 +10,7 @@ from threading import Lock
 from modules.utils.candy import locked
 from modules.utils.timer import Timer, get_eta
 from diffusers import StableDiffusionPipeline
+from modules.diffusion.layered_diffusion import Layer, layered_diffusion
 from modules.utils.myhash import hashi
 from modules.utils import pil2jpegbytes, normalize_resolution
 from modules.utils.misc import default_neg_prompt, upfile2img, DEFAULT_RESOLUTION
@@ -17,7 +18,7 @@ from modules.diffusion.model_mgr import pipe as diffusion_pipe, models, get_mode
 from modules.superres import upscale
 from PIL import Image
 import numpy as np
-from typing import List
+from typing import List, Dict
 app = FastAPI()
 
 pool = ThreadPoolExecutor()
@@ -105,7 +106,7 @@ class SRTicket(Ticket):
 
 class IMG2IMGTicket(Ticket):
     tickets = {}
-    STEP = 25
+    STEP = 35
     LOCK = DIFFUSION_INFER_LOCK
     TIMER_KEY = "diffusion_infer_resolution_steps"
     def __init__(self, token=None, strength=0.75):
@@ -754,6 +755,55 @@ def post_ticket_create(purpose: str):
     ret["status"] = 0
     ret["message"] = "ok"
     ret["data"] = {"id": t.id}
+    return JSONResponse(ret)
+
+uploaded_images = {}
+@app.post("/upload_image")
+def post_upload_any(data: UploadFile = File()):
+    img = upfile2img(data)
+    img_id = add_img(img)
+    while(len(uploaded_images)>128):
+        uploaded_images.pop(next(iter(uploaded_images)))
+    uploaded_images[img_id] = img
+    return JSONResponse({"status": 0, "data": {"img_id": img_id}})
+
+class LDParam(BaseModel):
+    layers: List[Dict]
+    width: int
+    height: int
+
+@app.post("/layered_diffusion")
+def post_layered_diffusion(data: LDParam):
+    def layer_dict2obj(layer: Dict) -> Layer:
+        cp = dict(layer)
+        for k, v in cp.items():
+            if (isinstance(v, str) and v in images):
+                cp[k] = images[v]
+        return Layer(**cp)
+    layers = [layer_dict2obj(i) for i in data.layers]
+    area = data.width*data.height
+    newarea = DEFAULT_RESOLUTION
+    ratio = (newarea/area)**0.5
+    for idx, layer in enumerate(layers):
+        def rs(im: Image.Image):
+            w, h = im.size
+            neww, newh = int(ratio*w), int(ratio*h)
+            return im.resize((neww, newh), Image.LANCZOS)
+        if (isinstance(layer.image, Image.Image)):
+            layer.image = rs(layer.image)
+        if (isinstance(layer.beta_mask, Image.Image)):
+            layer.beta_mask = rs(layer.beta_mask).convert("L")
+    w, h = normalize_resolution(data.width, data.height)
+    result = layered_diffusion(get_model(), layers, width=w, height=h)
+    
+    ret = {
+        "status": 0,
+        "message": "ok",
+        "data": {
+            "image": add_img(result)
+        }
+    }
+
     return JSONResponse(ret)
 
 

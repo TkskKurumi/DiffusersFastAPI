@@ -9,6 +9,17 @@ class WeightedPrompt:
             raise ValueError("Unsupported prompt type%s" % type(prompt))
 
     def init_str(self, prompt: str):
+        self.loras = {}
+
+        def extract_lora(pro):
+            pattern = r"(<lora:([\s\S]+?):(-?\d+|-?\d*\.\d*)>)"
+            loras = re.findall(pattern, pro)
+            for full, name, ratio in loras:
+                self.loras[name] = self.loras.get(name, 0) + float(ratio)
+                pro = pro.replace(full, "")
+            return pro
+        prompt = extract_lora(prompt)
+
         pattern = r"[{}]|/\*|\*/"
         ret = []
         operators = re.findall(pattern, prompt)
@@ -39,6 +50,8 @@ class WeightedPrompt:
             ret[k] = re.sub("( *, *)+", ", ", ret[k])
         return ret
 if(__name__=="__main__"):
-    prompt = "hello, {world}, /*bad guy*/, ok"
-    print(list(WeightedPrompt(prompt)))
-    print(WeightedPrompt(prompt).as_dict())
+    prompt = "<lora:foo1:-1><lora:foo2:1.0>hello, {world}, /*bad guy*/, ok"
+    WP = WeightedPrompt(prompt)
+    print(list(WP))
+    print(WP.as_dict())
+    print(WP.loras)

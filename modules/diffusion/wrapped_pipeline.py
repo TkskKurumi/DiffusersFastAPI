@@ -140,6 +140,10 @@ def split_batch(inp, batch_size=0, torch_cat=False):
         ret.append(batch)
     return ret
 TI_NEAREST_ORIG_WORD = False
+
+
+
+
 class CustomPipeline:
     def __init__(self, sd_pipeline: StableDiffusionPipeline, ti_autoload_path=None, lora_load_path=None):
         self.sd_pipeline = sd_pipeline
@@ -163,12 +167,17 @@ class CustomPipeline:
         self.ti_loaded = {}
         self.loras = {}
         self.lora_info = {}
+        self.lora_file = {}
         self.ti_ph_assign = NameAssign()
         self.orig_embd_weights = self.text_encoder.text_model.embeddings.token_embedding.weight.numpy(force=True)
         self.auto_load_ti()
         
         self.auto_load_lora()
         self.inference_lock = Lock()
+
+
+
+
     def random_prompt(self):
         st, ed = self.tokenizer("")["input_ids"]
         hi = min(st, ed)
@@ -182,15 +191,13 @@ class CustomPipeline:
         files = list()
         files.extend(glob(path.join(pth, "*.pt")))
         files.extend(glob(path.join(pth, "*.safetensors")))
-        exists = {}
         for i in files:
             name = path.splitext(path.basename(i))[0]
             if(name in self.loras):
-                exists[name] = True
                 continue
+            self.lora_file[name] = i
             pt = load_tensor(i)
             self.loras[name] = pt
-            exists[name] = True
         files = list()
         files.extend(glob(path.join(pth, "*", "*.pt")))
         files.extend(glob(path.join(pth, "*", "*.safetensors")))
@@ -198,23 +205,25 @@ class CustomPipeline:
             dn = path.dirname(i)
             name = path.basename(dn)
             if(name in self.loras):
-                exists[name] = True
                 continue
-            meta = path.join(dn, "info.json")
+            self.lora_file[name] = i
             pt = load_tensor(i)
             self.loras[name] = pt
+            
+            meta = path.join(dn, "info.json")
             if(path.exists(meta)):
                 with open(meta) as f:
                     j = json.load(f)
                     self.lora_info[name] = j
-            exists[name] = True
 
         for k in list(self.loras):
-            if(k not in exists):
-                self.loras.pop(k)
-        for k in list(self.lora_info):
-            if(k not in exists):
-                self.lora_info.pop(k, None)
+            if (k in self.lora_file):
+                f = self.lora_file[k]
+                if(not path.exists(f)):
+                    self.loras.pop(k)
+                    if(k in self.lora_info):
+                        self.lora_info.pop(k)
+
     def wrap_lora(self, *args):
         self.auto_load_lora()
         state_dicts = []
@@ -437,7 +446,10 @@ class CustomPipeline:
         """
         alpha: the rate of num_denoising_step/steps
         """
-        with torch.autocast("cuda"), locked(self.inference_lock):
+        loras = WeightedPrompt(prompt).loras
+        loras = [(w, name) for name, w in loras.items()]
+        lora_u, lora_t = self.wrap_lora(*loras)
+        with torch.autocast("cuda"), locked(self.inference_lock), lora_u, lora_t:
             text_encoder = self.text_encoder
             unet = self.unet
             sched = self.sched
@@ -482,8 +494,22 @@ class CustomPipeline:
             init_timestep = min(init_timestep, steps)
             timesteps = sched.timesteps[-init_timestep]
             timesteps = torch.tensor([timesteps], device=self.device)
+            if (True):
+                init_numpy = init_latents.cpu().numpy()
+                n = 0
+                iter_count = 10
+                for i in range(iter_count):
+                    _noise = np.random.normal(size=init_numpy.shape)
+                    if ((_noise*init_numpy).sum()<0):
+                        n -= _noise
+                    else:
+                        n += _noise
+                n /= sqrt(iter_count)
+                print("std/mean", np.std(n), np.mean(n))
+                noise = torch.from_numpy(n).to(device=self.device, dtype=latents_dtype)
+            else:
+                noise = torch.randn(init_latents.shape, generator=None, device=self.device, dtype=latents_dtype)
             
-            noise = torch.randn(init_latents.shape, generator=None, device=self.device, dtype=latents_dtype)
             if(use_noise is not None):
                 use_noise = torch.tensor(use_noise).to(device=DEFAULT_DEVICE)
                 noise = use_noise*use_noise_alpha+noise*(1-use_noise_alpha)
@@ -511,16 +537,31 @@ class CustomPipeline:
                 it = list(enumerate(self.sd_pipeline.progress_bar(timesteps)))
             else:
                 it = list(enumerate(timesteps))
+            low_freq_fix = True
+            hi_freq_fix = False
             for i, t in it:
                 noise_pred = self._predict_noise(latents, weights, cond_batches, cond_num, noise_pred_batch_size, t)
-                latents = sched.step(noise_pred, t, latents).prev_sample
+                latents: torch.Tensor = sched.step(noise_pred, t, latents).prev_sample
                 if(beta!=1):
                     if(i+1<len(it)):
                         i1, t1 = it[i+1]
                         latents_proper = sched.add_noise(orig_latents, noise, torch.tensor([t1]))
                     else:
                         latents_proper = orig_latents
-
+                    if (low_freq_fix):
+                        now_mean = latents.mean(axis=-1, keepdim=True).mean(axis=-2, keepdim=True)
+                        tar_mean = latents_proper.mean(axis=-1, keepdim=True).mean(axis=-2, keepdim=True)
+                        if (True):
+                            latents_proper = latents_proper-tar_mean+now_mean
+                        else:
+                            latents = latents+(tar_mean-now_mean)*(1-rate_latent)
+                    if (hi_freq_fix):
+                        now_std = latents.std(axis=-1, keepdim=True).std(axis=-2, keepdim=True)
+                        tar_std = latents_proper.std(axis=-1, keepdim=True).std(axis=-2, keepdim=True)
+                        tar_mean = latents_proper.mean(axis=-1, keepdim=True).mean(axis=-2, keepdim=True)
+                        if (True):
+                            latents_proper = (latents_proper-tar_mean)/tar_std*now_std + tar_mean
+                        
                     latents = (latents*rate_latent)+(latents_proper*(1-rate_latent))
             latents = 1 / 0.18215 * latents
             image = vae.decode(latents).sample
@@ -720,7 +761,10 @@ class CustomPipeline:
 
     @torch.no_grad()
     def txt2img(self, prompt, cfg=7.5, steps=20, width=512, height=768, neg_prompt = "", noise_pred_batch_size=NOISE_PRED_BATCH, return_noise=False, use_noise=None, use_noise_alpha=1):
-        with torch.autocast("cuda"), locked(self.inference_lock):
+        loras = WeightedPrompt(prompt).loras
+        loras = [(w, name) for name, w in loras.items()]
+        lora_u, lora_t = self.wrap_lora(*loras)
+        with torch.autocast("cuda"), locked(self.inference_lock), lora_u, lora_t:
 
             text_encoder = self.text_encoder
             unet = self.unet
